@@ -1,0 +1,21 @@
+[Unit]
+Description=SentryFeed dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kaido
+WorkingDirectory=/home/kaido/sentryfeed
+ExecStart=/home/kaido/sentryfeed/venv/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the process can only write inside the project folder
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/kaido/sentryfeed
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,6 @@
+# Local data and secrets: never commit these
+sentryfeed.db
+.nvd_api_key
+
+venv/
+__pycache__/

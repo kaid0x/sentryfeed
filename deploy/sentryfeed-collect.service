@@ -1,0 +1,16 @@
+[Unit]
+Description=SentryFeed collector (fetch, CVE lookup, scoring)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kaido
+WorkingDirectory=/home/kaido/sentryfeed
+ExecStart=/home/kaido/sentryfeed/venv/bin/python collect.py
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/kaido/sentryfeed

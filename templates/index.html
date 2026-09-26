@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SentryFeed</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0d10;
+    --panel: #12151a;
+    --panel-hover: #181c22;
+    --line: #232830;
+    --text: #e4e7eb;
+    --muted: #8a929c;
+    --red: #f0524f;
+    --orange: #f5903d;
+    --yellow: #e5c243;
+    --green: #4cc38a;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 var(--sans);
+    display: flex;
+    flex-direction: column;
+  }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  /* Header */
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 20px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font: 600 17px var(--mono); letter-spacing: 0.04em; margin: 0; }
+  .brand span { color: var(--red); }
+  .updated { font: 12px var(--mono); color: var(--muted); }
+  .windows { margin-left: auto; display: flex; gap: 4px; }
+  .windows a {
+    font: 12px var(--mono);
+    color: var(--muted);
+    text-decoration: none;
+    padding: 4px 9px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+  }
+  .windows a:hover { color: var(--text); }
+  .windows a[aria-current="page"] { color: var(--text); border-color: var(--line); background: var(--panel); }
+
+  /* Severity tiles, doubling as filters */
+  .tiles {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+  .tile {
+    background: var(--bg);
+    border: 0;
+    padding: 12px 20px;
+    text-align: left;
+    cursor: pointer;
+    border-top: 3px solid var(--sev);
+    opacity: 1;
+    transition: opacity 0.15s, background 0.15s;
+  }
+  .tile:hover { background: var(--panel); }
+  .tile .n { display: block; font: 600 26px/1.1 var(--mono); color: var(--sev); }
+  .tile .label { font-size: 13px; color: var(--muted); }
+  .tiles.filtering .tile:not([aria-pressed="true"]) { opacity: 0.35; }
+
+  /* Two panes */
+  main {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(320px, 440px) 1fr;
+  }
+  .feed {
+    overflow-y: auto;
+    border-right: 1px solid var(--line);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .feed li { border-bottom: 1px solid var(--line); }
+  .item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-left: 3px solid var(--sev);
+    padding: 11px 16px 12px 14px;
+    cursor: pointer;
+  }
+  .item:hover { background: var(--panel-hover); }
+  .item[aria-current="true"] { background: var(--panel); }
+  .item .title { display: block; font-size: 14px; line-height: 1.4; }
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    margin-top: 5px;
+    font: 11.5px var(--mono);
+    color: var(--muted);
+  }
+  .sev-tag { color: var(--sev); text-transform: uppercase; letter-spacing: 0.05em; }
+  .kev-tag { color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 0 4px; }
+
+  .sev-red    { --sev: var(--red); }
+  .sev-orange { --sev: var(--orange); }
+  .sev-yellow { --sev: var(--yellow); }
+  .sev-green  { --sev: var(--green); }
+
+  /* Detail pane */
+  .detail { overflow-y: auto; padding: 28px 36px 40px; }
+  .detail-inner { max-width: 720px; }
+  .detail .why {
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+    font: 12px var(--mono);
+    color: var(--sev);
+    border: 1px solid var(--sev);
+    border-radius: 4px;
+    padding: 3px 9px;
+  }
+  .detail h2 { font-size: 22px; line-height: 1.3; margin: 16px 0 8px; font-weight: 600; }
+  .detail .meta { font-size: 12.5px; margin: 0 0 20px; }
+  .cves { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
+  .cves a {
+    font: 12px var(--mono);
+    text-decoration: none;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 3px 8px;
+    background: var(--panel);
+  }
+  .cves a:hover { border-color: var(--muted); }
+  .summary { color: #c5cad1; margin: 0 0 24px; white-space: pre-line; }
+  .read {
+    display: inline-block;
+    font-size: 14px;
+    text-decoration: none;
+    border: 1px solid var(--text);
+    border-radius: 5px;
+    padding: 8px 16px;
+  }
+  .read:hover { background: var(--text); color: var(--bg); }
+
+  .empty { padding: 48px 24px; color: var(--muted); text-align: center; }
+  .empty code { font-family: var(--mono); color: var(--text); }
+
+  @media (max-width: 860px) {
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .tile { padding: 10px 16px; }
+    main { display: flex; flex-direction: column-reverse; }
+    .feed { border-right: 0; overflow: visible; }
+    .detail { padding: 20px 16px 24px; border-bottom: 1px solid var(--line); }
+    .detail h2 { font-size: 19px; }
+    header { padding: 12px 16px; }
+    .windows { margin-left: 0; width: 100%; }
+    body { height: auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 class="brand">SENTRY<span>/</span>FEED</h1>
+  <span class="updated">{% if updated %}updated {{ updated }}{% else %}no data yet{% endif %}{% if kev_count %} · {{ kev_count }} actively exploited{% endif %}</span>
+  <nav class="windows" aria-label="Time window">
+    {% for d, label in windows %}
+      <a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+</header>
+
+<div class="tiles" id="tiles">
+  {% for key, label in severities %}
+    <button class="tile sev-{{ key }}" data-sev="{{ key }}" aria-pressed="false">
+      <span class="n">{{ counts.get(key, 0) }}</span>
+      <span class="label">{{ label }}</span>
+    </button>
+  {% endfor %}
+</div>
+
+<main>
+  {% if items %}
+    <ul class="feed" id="feed">
+      {% for item in items %}
+        <li data-sev="{{ item.severity }}">
+          <button class="item sev-{{ item.severity }}" data-index="{{ loop.index0 }}"{% if loop.first %} aria-current="true"{% endif %}>
+            <span class="title">{{ item.title }}</span>
+            <span class="meta">
+              <span class="sev-tag">{{ dict(severities)[item.severity] }}</span>
+              <span>{{ item.source }}</span>
+              {% if item.age %}<span>{{ item.age }}</span>{% endif %}
+              {% if item.kev %}<span class="kev-tag">KEV</span>{% endif %}
+            </span>
+          </button>
+        </li>
+      {% endfor %}
+    </ul>
+    <section class="detail" id="detail" aria-live="polite">
+      <div class="detail-inner">
+        <span class="why" id="d-why"></span>
+        <h2 id="d-title"></h2>
+        <div class="meta" id="d-meta"></div>
+        <div class="cves" id="d-cves"></div>
+        <p class="summary" id="d-summary"></p>
+        <a class="read" id="d-link" target="_blank" rel="noopener noreferrer">Read the article ↗</a>
+      </div>
+    </section>
+  {% else %}
+    <p class="empty">Nothing in this time window yet. Run <code>python collect.py</code> on the Pi, then refresh.</p>
+  {% endif %}
+</main>
+
+<script>
+  const ITEMS = {{ items | tojson }};
+  const LABELS = {{ dict(severities) | tojson }};
+
+  // Everything from the feeds goes in via textContent, never innerHTML,
+  // so article text can't inject markup into the page.
+  const $ = (id) => document.getElementById(id);
+
+  function show(index) {
+    const item = ITEMS[index];
+    if (!item) return;
+    const detail = $("detail");
+    detail.className = "detail sev-" + item.severity;
+
+    $("d-why").textContent = LABELS[item.severity] + " · " + item.severity_reason;
+    $("d-title").textContent = item.title;
+
+    const meta = $("d-meta");
+    meta.replaceChildren();
+    for (const part of [item.source, item.category, item.age]) {
+      if (!part) continue;
+      const span = document.createElement("span");
+      span.textContent = part;
+      meta.append(span);
+    }
+
+    const cves = $("d-cves");
+    cves.replaceChildren();
+    for (const id of item.cves) {
+      const a = document.createElement("a");
+      a.href = "https://nvd.nist.gov/vuln/detail/" + encodeURIComponent(id);
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = id;
+      cves.append(a);
+    }
+
+    $("d-summary").textContent = item.summary || "No summary in the feed.";
+
+    const link = $("d-link");
+    if (item.link) { link.href = item.link; link.hidden = false; }
+    else { link.hidden = true; }
+
+    document.querySelectorAll(".item[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
+    document.querySelector(`.item[data-index="${index}"]`).setAttribute("aria-current", "true");
+  }
+
+  const feed = $("feed");
+  if (feed) {
+    feed.addEventListener("click", (e) => {
+      const btn = e.target.closest(".item");
+      if (!btn) return;
+      show(Number(btn.dataset.index));
+      if (window.matchMedia("(max-width: 860px)").matches) {
+        $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    show(0);
+  }
+
+  // Tiles filter the list; clicking the active tile again clears the filter.
+  const tiles = $("tiles");
+  tiles.addEventListener("click", (e) => {
+    const tile = e.target.closest(".tile");
+    if (!tile) return;
+    const turningOn = tile.getAttribute("aria-pressed") !== "true";
+    tiles.querySelectorAll(".tile").forEach((t) => t.setAttribute("aria-pressed", "false"));
+    tile.setAttribute("aria-pressed", String(turningOn));
+    tiles.classList.toggle("filtering", turningOn);
+
+    const sev = turningOn ? tile.dataset.sev : null;
+    let first = null;
+    document.querySelectorAll("#feed li").forEach((li) => {
+      const visible = !sev || li.dataset.sev === sev;
+      li.hidden = !visible;
+      if (visible && first === null) first = li.querySelector(".item").dataset.index;
+    });
+    if (first !== null) show(Number(first));
+  });
+</script>
+</body>
+</html>
