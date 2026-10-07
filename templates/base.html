@@ -78,6 +78,7 @@
   <nav class="sections" aria-label="Sections">
     <a href="/"{% if active == "feed" %} aria-current="page"{% endif %}>Feed</a>
     <a href="/password"{% if active == "password" %} aria-current="page"{% endif %}>Password check</a>
+    <a href="/scan"{% if active == "scan" %} aria-current="page"{% endif %}>File &amp; link check</a>
   </nav>
   {% block header_extra %}{% endblock %}
 </header>

@@ -139,6 +139,11 @@ def password():
     return render_template("password.html")
 
 
+@app.route("/scan")
+def scan():
+    return render_template("scan.html")
+
+
 @app.route("/api/pwned/<prefix>")
 def pwned_range(prefix):
     """Relay a 5-character hash prefix to Pwned Passwords. The browser never sends

@@ -33,6 +33,15 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
 
 SentryFeed relays the request instead of the browser calling Pwned Passwords directly, so visitors' IP addresses never reach HIBP and the page's security policy can forbid connections to any other site. Browsers only provide built-in hashing on HTTPS pages, so `templates/_sha1.js` is a small fallback for the Pi's plain-HTTP setup, tested against Node's SHA-1 on 5,000+ inputs.
 
+## File & link check
+
+`/scan` builds links to [VirusTotal](https://www.virustotal.com) reports:
+
+- **Files** are fingerprinted (SHA-256) in the browser and never uploaded. Hashing streams the file in 4 MB chunks through `templates/_sha256.js`, so any size works without loading it all into memory; it's tested against Node's SHA-256 on 3,000+ inputs with random chunk splits.
+- **Links, domains, IPs and hashes** are recognised and sent to the matching report page. Anything that isn't `http` or `https` (such as `javascript:` or `file:`) is rejected.
+
+SentryFeed never calls the VirusTotal API itself: the free API is limited to 4 lookups a minute and can't be used in commercial products, while linking to VirusTotal's own pages has neither limit. The page warns that VirusTotal adds anything looked up through its website to its dataset, and that uploaded files are shared with its community.
+
 ## Scoring rules
 
 Signals are trusted in this order:
@@ -84,7 +93,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 
 ## Planned
 
-- A file and link checker. The file's fingerprint is calculated in the browser and checked against VirusTotal; the file itself is never uploaded.
 - A world map that places incidents geographically.
 - Share-price impact for public companies named in a breach.
 - Deduplicating the same story across outlets by title similarity.

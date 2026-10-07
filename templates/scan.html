@@ -1,0 +1,275 @@
+{% extends "base.html" %}
+{% set active = "scan" %}
+
+{% block title %}File & link check · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .page { flex: 1; overflow-y: auto; padding: 40px 20px 56px; }
+  .page-inner { max-width: 640px; margin: 0 auto; }
+  .page h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; font-weight: 600; }
+  .lede { color: #c5cad1; margin: 0 0 32px; }
+
+  .tool { border: 1px solid var(--line); border-radius: 8px; padding: 20px; margin-bottom: 20px; background: var(--panel); }
+  .tool h2 { font-size: 17px; margin: 0 0 4px; font-weight: 600; }
+  .tool .hint { color: var(--muted); font-size: 13.5px; margin: 0 0 14px; }
+
+  .drop {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    border: 1px dashed var(--muted); border-radius: 6px; padding: 26px 16px;
+    text-align: center; cursor: pointer; color: #c5cad1;
+  }
+  .drop:hover, .drop.over { border-color: var(--text); background: var(--panel-hover); }
+  .drop strong { color: var(--text); }
+  .drop small { color: var(--muted); font-size: 12.5px; }
+  #file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  #file:focus-visible + .drop { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  progress { width: 100%; height: 6px; margin-top: 14px; accent-color: var(--text); }
+
+  label.field-label { display: block; font-size: 13.5px; color: var(--muted); margin-bottom: 6px; }
+  .field { display: flex; gap: 8px; }
+  .text-input {
+    flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; font-family: var(--mono); font-size: 14px; outline: none;
+  }
+  .text-input:focus { border-color: var(--muted); }
+  .go {
+    background: var(--text); color: var(--bg); border: 0; border-radius: 6px;
+    padding: 0 20px; font-weight: 600; cursor: pointer;
+  }
+  .error { color: var(--red); font-size: 13.5px; margin: 8px 0 0; }
+
+  .out { margin-top: 16px; }
+  .out .label { font-size: 12.5px; color: var(--muted); margin: 0 0 4px; }
+  .out .value {
+    display: block; width: 100%; font: 12.5px var(--mono); color: var(--text);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+    overflow-wrap: anywhere; margin: 0 0 12px;
+  }
+  .links { display: flex; flex-wrap: wrap; gap: 8px; }
+  .vt {
+    display: inline-block; font-size: 14px; text-decoration: none;
+    border: 1px solid var(--text); border-radius: 6px; padding: 8px 14px;
+  }
+  .vt:hover { background: var(--text); color: var(--bg); }
+  .vt.secondary { border-color: var(--line); color: #c5cad1; }
+  .vt.secondary:hover { border-color: var(--text); background: none; color: var(--text); }
+
+  .warn {
+    margin: 14px 0 0; padding: 10px 12px; font-size: 13.5px; color: #c5cad1;
+    border-left: 3px solid var(--yellow); background: var(--bg); border-radius: 0;
+  }
+  .credit { font-size: 13px; color: var(--muted); margin: 28px 0 0; }
+
+  @media (max-width: 560px) {
+    .page { padding: 28px 16px 40px; }
+    .page h1 { font-size: 22px; }
+    .tool { padding: 16px; }
+    .field { flex-direction: column; }
+    .go { padding: 10px 20px; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="page">
+  <div class="page-inner">
+    <h1>Is this file or link safe?</h1>
+    <p class="lede">Look things up in VirusTotal, which checks them against 70+ antivirus engines and security services. Files are fingerprinted on your device and never uploaded.</p>
+
+    <noscript><p class="error">These checks run in your browser, so they need JavaScript turned on.</p></noscript>
+
+    <section class="tool" aria-labelledby="file-heading">
+      <h2 id="file-heading">Check a file</h2>
+      <p class="hint">Your browser calculates the file's SHA-256 fingerprint. Only that goes to VirusTotal.</p>
+
+      <input type="file" id="file">
+      <label class="drop" id="drop" for="file">
+        <strong>Choose a file</strong>
+        <span>or drop it here</span>
+        <small>Any size. It doesn't leave your device.</small>
+      </label>
+      <progress id="file-progress" max="1" value="0" hidden></progress>
+
+      <div class="out" id="file-out" hidden>
+        <p class="label" id="file-name"></p>
+        <code class="value" id="file-hash"></code>
+        <div class="links"><a class="vt" id="file-link" target="_blank" rel="noopener noreferrer">Open VirusTotal report ↗</a></div>
+        <p class="warn">If VirusTotal hasn't seen this file, it will offer to upload it. Uploaded files are shared with VirusTotal's security community, so never upload anything private, like documents, photos or payslips.</p>
+      </div>
+      <p class="error" id="file-error" role="alert" hidden></p>
+    </section>
+
+    <section class="tool" aria-labelledby="link-heading">
+      <h2 id="link-heading">Check a link, domain, IP or file hash</h2>
+      <p class="hint">Paste a full link, a domain like example.com, an IP address, or an MD5, SHA-1 or SHA-256 hash.</p>
+
+      <form id="link-form" novalidate>
+        <label class="field-label" for="link">What to check</label>
+        <div class="field">
+          <input class="text-input" id="link" type="text" autocomplete="off" autocapitalize="off"
+                 autocorrect="off" spellcheck="false" aria-describedby="link-error">
+          <button type="submit" class="go">Check</button>
+        </div>
+        <p class="error" id="link-error" role="alert" hidden></p>
+      </form>
+
+      <div class="out" id="link-out" hidden>
+        <p class="label" id="link-kind"></p>
+        <code class="value" id="link-value"></code>
+        <div class="links" id="link-links"></div>
+      </div>
+      <p class="warn">VirusTotal adds everything looked up through its website to its dataset, where other researchers can see it, and it may visit a link to scan it. Don't check links that contain personal details, like password-reset, invite or document-sharing links.</p>
+    </section>
+
+    <p class="credit">Results come from <a href="https://www.virustotal.com" target="_blank" rel="noopener noreferrer">VirusTotal</a>. SentryFeed only builds the link to the right report; the lookup happens on VirusTotal's site.</p>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+{% include "_sha256.js" %}
+
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const VT = "https://www.virustotal.com/gui/";
+  const CHUNK = 4 * 1024 * 1024;
+
+  function makeLink(href, text, secondary) {
+    const a = document.createElement("a");
+    a.className = secondary ? "vt secondary" : "vt";
+    a.href = href;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = text;
+    return a;
+  }
+
+  function formatSize(bytes) {
+    const units = ["bytes", "KB", "MB", "GB", "TB"];
+    let i = 0, n = bytes;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+    return (i === 0 ? n : n.toFixed(1)) + " " + units[i];
+  }
+
+  // ---- File check ----
+  const fileInput = $("file"), drop = $("drop"), progress = $("file-progress");
+  let currentJob = 0;
+
+  async function hashFile(file) {
+    const job = ++currentJob;
+    $("file-out").hidden = true;
+    $("file-error").hidden = true;
+    progress.value = 0;
+    progress.hidden = false;
+    try {
+      const sha = new Sha256();
+      for (let start = 0; start < file.size; start += CHUNK) {
+        const chunk = new Uint8Array(await file.slice(start, start + CHUNK).arrayBuffer());
+        if (job !== currentJob) return; // a newer file was picked; abandon this one
+        sha.update(chunk);
+        progress.value = Math.min(1, (start + chunk.length) / file.size);
+      }
+      const hash = sha.hex();
+      $("file-name").textContent = file.name + " · " + formatSize(file.size);
+      $("file-hash").textContent = hash;
+      $("file-link").href = VT + "file/" + hash;
+      $("file-out").hidden = false;
+    } catch (err) {
+      $("file-error").textContent = "Couldn't read that file. Try choosing it again.";
+      $("file-error").hidden = false;
+    } finally {
+      if (job === currentJob) progress.hidden = true;
+    }
+  }
+
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) hashFile(fileInput.files[0]);
+  });
+
+  // Without this, dropping a file anywhere on the page makes the browser open it.
+  ["dragover", "drop"].forEach((type) => window.addEventListener(type, (e) => e.preventDefault()));
+  drop.addEventListener("dragover", () => drop.classList.add("over"));
+  drop.addEventListener("dragleave", () => drop.classList.remove("over"));
+  drop.addEventListener("drop", (e) => {
+    drop.classList.remove("over");
+    if (e.dataTransfer.files.length) hashFile(e.dataTransfer.files[0]);
+  });
+
+  // ---- Link / domain / IP / hash check ----
+  const HASH_RE = /^(?:[0-9a-f]{32}|[0-9a-f]{40}|[0-9a-f]{64})$/i;
+  const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
+  const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,62}$/;
+
+  function parseUrl(text) {
+    try {
+      const url = new URL(text);
+      return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+    } catch { return null; }
+  }
+
+  // Returns { kind, value, links: [[href, text, secondary], ...] } or null.
+  function classify(raw) {
+    const text = raw.trim();
+    if (HASH_RE.test(text)) {
+      const hash = text.toLowerCase();
+      return { kind: "File hash", value: hash, links: [[VT + "file/" + hash, "Open VirusTotal report ↗"]] };
+    }
+    if (IPV4_RE.test(text)) {
+      return { kind: "IP address", value: text, links: [[VT + "ip-address/" + text, "Open VirusTotal report ↗"]] };
+    }
+
+    // A full link, or something like example.com/page typed without https://
+    const hasScheme = /^[a-z][a-z0-9+.-]*:/i.test(text);
+    const url = parseUrl(hasScheme ? text : "https://" + text);
+    if (!url || !url.hostname) return null;
+    const host = url.hostname;
+    const hostIsIp = IPV4_RE.test(host);
+    if (!hostIsIp && !DOMAIN_RE.test(host)) return null;
+
+    const bare = !hasScheme && url.pathname === "/" && !url.search && !url.hash && !text.includes("/");
+    const hostHref = hostIsIp ? VT + "ip-address/" + host : VT + "domain/" + host;
+    if (bare) {
+      return { kind: hostIsIp ? "IP address" : "Domain", value: host, links: [[hostHref, "Open VirusTotal report ↗"]] };
+    }
+    return {
+      kind: hasScheme ? "Link" : "Link (https:// added)",
+      value: url.href,
+      links: [
+        [VT + "search/" + encodeURIComponent(url.href), "Check this link ↗"],
+        [hostHref, "Check " + host + " ↗", true],
+      ],
+    };
+  }
+
+  const linkInput = $("link"), linkError = $("link-error"), linkOut = $("link-out");
+  linkInput.addEventListener("input", () => { linkError.hidden = true; linkOut.hidden = true; });
+
+  $("link-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    linkOut.hidden = true;
+    if (!linkInput.value.trim()) {
+      linkError.textContent = "Paste a link, domain, IP address or hash first.";
+      linkError.hidden = false;
+      linkInput.focus();
+      return;
+    }
+    const result = classify(linkInput.value);
+    if (!result) {
+      linkError.textContent = "That doesn't look like a link, domain, IP address or file hash. Links need to start with http:// or https://.";
+      linkError.hidden = false;
+      linkInput.focus();
+      return;
+    }
+    linkError.hidden = true;
+    $("link-kind").textContent = result.kind;
+    $("link-value").textContent = result.value;
+    const links = $("link-links");
+    links.replaceChildren(...result.links.map(([href, text, secondary]) => makeLink(href, text, secondary)));
+    linkOut.hidden = false;
+  });
+})();
+</script>
+{% endblock %}
