@@ -19,7 +19,7 @@
   /* Severity tiles, doubling as filters */
   .tiles {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat({{ severities | length }}, 1fr);
     gap: 1px;
     background: var(--line);
     border-bottom: 1px solid var(--line);
@@ -77,6 +77,7 @@
   }
   .sev-tag { color: var(--sev); text-transform: uppercase; letter-spacing: 0.05em; }
   .kev-tag { color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 0 4px; }
+  .also-tag { color: var(--text); }
 
   /* Detail pane */
   .detail { overflow-y: auto; padding: 28px 36px 40px; }
@@ -114,12 +115,22 @@
   }
   .read:hover { background: var(--text); color: var(--bg); }
 
+  .also { margin: 32px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); }
+  .also h3 { font: 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 10px; font-weight: 400; }
+  .also ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .also a { text-decoration: none; display: block; }
+  .also a:hover .also-title { text-decoration: underline; }
+  .also-source { display: block; font: 12px var(--mono); color: var(--muted); }
+  .also-title { font-size: 14px; }
+
   .empty { padding: 48px 24px; color: var(--muted); text-align: center; }
   .empty code { font-family: var(--mono); color: var(--text); }
 
   @media (max-width: 860px) {
-    .tiles { grid-template-columns: repeat(2, 1fr); }
-    .tile { padding: 10px 16px; }
+    /* 3 tiles on the first row, 2 wider ones on the second, no empty cell */
+    .tiles { grid-template-columns: repeat(6, 1fr); }
+    .tile { grid-column: span 2; padding: 10px 14px; }
+    .tile:nth-child(n+4) { grid-column: span 3; }
     main { display: flex; flex-direction: column-reverse; }
     .feed { border-right: 0; overflow: visible; }
     .detail { padding: 20px 16px 24px; border-bottom: 1px solid var(--line); }
@@ -161,6 +172,7 @@
               <span>{{ item.source }}</span>
               {% if item.age %}<span>{{ item.age }}</span>{% endif %}
               {% if item.kev %}<span class="kev-tag">KEV</span>{% endif %}
+              {% if item.also %}<span class="also-tag">+{{ item.also | length }} source{{ "s" if item.also | length > 1 }}</span>{% endif %}
             </span>
           </button>
         </li>
@@ -174,6 +186,10 @@
         <div class="cves" id="d-cves"></div>
         <p class="summary" id="d-summary"></p>
         <a class="read" id="d-link" target="_blank" rel="noopener noreferrer">Read the article ↗</a>
+        <div class="also" id="d-also" hidden>
+          <h3>Also reported by</h3>
+          <ul id="d-also-list"></ul>
+        </div>
       </div>
     </section>
   {% else %}
@@ -225,6 +241,29 @@
     const link = $("d-link");
     if (item.link) { link.href = item.link; link.hidden = false; }
     else { link.hidden = true; }
+
+    const also = $("d-also-list");
+    also.replaceChildren();
+    for (const other of item.also || []) {
+      const li = document.createElement("li");
+      const source = document.createElement("span");
+      source.className = "also-source";
+      source.textContent = other.source + (other.age ? " · " + other.age : "");
+      const title = document.createElement("span");
+      title.className = "also-title";
+      title.textContent = other.title + (other.link ? " ↗" : "");
+      let box = li;
+      if (other.link) {
+        box = document.createElement("a");
+        box.href = other.link;
+        box.target = "_blank";
+        box.rel = "noopener noreferrer";
+        li.append(box);
+      }
+      box.append(source, title);
+      also.append(li);
+    }
+    $("d-also").hidden = !(item.also && item.also.length);
 
     document.querySelectorAll(".item[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
     document.querySelector(`.item[data-index="${index}"]`).setAttribute("aria-current", "true");

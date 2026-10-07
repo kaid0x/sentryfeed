@@ -8,6 +8,7 @@ import requests
 from flask import Flask, Response, g, jsonify, render_template, request
 
 from db import DB_PATH, connect
+from dedupe import group_stories
 
 app = Flask(__name__)
 
@@ -20,6 +21,7 @@ SEVERITIES = [
     ("orange", "Medium"),
     ("yellow", "Low"),
     ("green", "Tech & AI"),
+    ("blue", "Events"),
 ]
 RANK = {key: i for i, (key, _) in enumerate(SEVERITIES)}
 WINDOWS = [(1, "24h"), (3, "3 days"), (7, "7 days"), (14, "14 days")]
@@ -43,7 +45,8 @@ def ago(iso, now):
     return f"{minutes // 1440}d ago"
 
 
-def load_items(days):
+def load_items_ungrouped(days):
+    """Every item in the window, one per article."""
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
     conn = connect()
@@ -69,6 +72,23 @@ def load_items(days):
     items.sort(key=lambda i: i["published"] or "", reverse=True)
     items.sort(key=lambda i: RANK.get(i["severity"], len(RANK)))
     return items
+
+
+# What the page needs about each other outlet covering a story.
+ALSO_FIELDS = ("source", "title", "link", "age", "match")
+
+
+def load_items(days):
+    """One entry per story. When several outlets covered it, the highest-ranked
+    article leads (so the story takes its colour), and the rest are listed under
+    "also" with their CVEs added to the lead's."""
+    stories = group_stories(load_items_ungrouped(days), RANK)
+    for story in stories:
+        others = story["also"]
+        story["cves"] = sorted(set(story["cves"]).union(*(m["cves"] for m in others)))
+        story["kev"] = int(any(m["kev"] for m in [story, *others]))
+        story["also"] = [{k: m.get(k) for k in ALSO_FIELDS} for m in others]
+    return stories
 
 
 def last_updated():

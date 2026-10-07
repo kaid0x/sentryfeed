@@ -8,6 +8,9 @@ A self-hosted threat-intel dashboard running on a Raspberry Pi 3B. Every 30 minu
 | Orange | CVSS 7.0 to 8.9, or a serious incident (breach, ransomware, takeover) |
 | Yellow | Everything else that happened |
 | Green | Tech and AI news, not an incident |
+| Blue | Events: webinars, virtual events, guides and similar posts. Kept because they can be worth reading, but never counted as incidents |
+
+The same story from several outlets is shown once, with the other outlets listed under it.
 
 ## How it works
 
@@ -17,6 +20,8 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
                ├─ fetch.py    download and normalise 9 feeds
                ├─ enrich.py   pull CVE IDs, look up CVSS and CISA KEV status in NVD
                └─ score.py    assign a colour and record why
+
+app.py ──> dedupe.py   group the same story from different outlets
 ```
 
 - **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review. The list lives in `feeds.py`.
@@ -50,7 +55,19 @@ Signals are trusted in this order:
 2. **CVSS.** 9.0+ red, 7.0 to 8.9 orange, below 7 yellow. Exploitation language ("exploited in the wild", "zero-day") still lifts a scored item to red, because a medium bug under active attack matters more than its score.
 3. **Keywords.** Used only when there's no score. The lists are at the top of `score.py`.
 
+**Events** are spotted by their titles (`[Virtual Event] ...`, `Webinar: ...`, Schneier's Friday squid post) and turn blue before any other rule runs, so a webinar called "Defending against zero-days" isn't counted as a zero-day.
+
+**Negation.** A keyword doesn't count when it's being denied: "not a zero-day", "hasn't been exploited in the wild" and "no evidence it has been exploited in the wild" don't turn red. Only short filler words may sit between the negation and the keyword, so "Microsoft has not patched a zero-day" still does.
+
 Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploited`, `mentions 'zero-day'`), and the dashboard shows it. Everything is rescored on every run, so a score that arrives later or a keyword change applies to old items too.
+
+## Merging duplicate stories
+
+`dedupe.py` groups articles from different outlets that cover the same story. Two articles match when they come from different sources, were published within 72 hours of each other, and either mention the same CVE or have similar titles.
+
+Title similarity weights each word by how rare it is across everything in the window, so sharing "Kiteworks" counts for far more than sharing "flaw" or "attack". The threshold (0.35) was set on ~65 real headlines: the true pairs scored 0.37 to 0.72 and the closest unrelated pair 0.32. Each article is only compared with the first article of each group, so one loose match can't chain unrelated stories together, and an event post is never merged with news about the same topic.
+
+The highest-ranked article leads, so the story takes its colour; the tiles count stories, not articles; and the CVEs of every article in the group are shown. Run `python dedupe.py` to print the groups it would make from your database.
 
 ## Design decisions
 
@@ -87,13 +104,12 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 
 ## Known limitations
 
-- Keyword matching can't read context: "not a zero-day" still matches "zero-day".
-- The same story from two outlets appears twice, since deduplication is by URL.
-- Non-incident posts in the security feeds (events, opinion pieces) land in yellow.
+- Keyword matching only understands simple negation; sarcasm or "could become a zero-day" still matches.
+- Story merging compares titles only, so two very differently worded headlines about the same story stay separate.
+- Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 
 ## Planned
 
 - A world map that places incidents geographically.
 - Share-price impact for public companies named in a breach.
-- Deduplicating the same story across outlets by title similarity.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS items (
     cves        TEXT,              -- NULL = not checked yet, '' = checked and none found
     cvss        REAL,              -- highest score among the item's CVEs
     kev         INTEGER NOT NULL DEFAULT 0,  -- 1 if any of its CVEs is in CISA's exploited list
-    severity    TEXT,              -- red / orange / yellow / green
+    severity    TEXT,              -- red / orange / yellow / green / blue
     severity_reason TEXT           -- why it got that colour, shown on the dashboard
 );
 CREATE INDEX IF NOT EXISTS idx_items_published ON items(published);
