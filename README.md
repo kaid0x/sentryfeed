@@ -23,6 +23,16 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
 
+## Password check
+
+`/password` tells you whether a password has appeared in a data breach, using [Have I Been Pwned's Pwned Passwords](https://haveibeenpwned.com/Passwords), without the password leaving the browser:
+
+1. The browser hashes the password with SHA-1.
+2. Only the first 5 of the hash's 40 characters go to SentryFeed, which relays them to Pwned Passwords and gets back every leaked hash starting with them (a few hundred, padded with fake entries so the response size gives nothing away).
+3. The browser looks for its own full hash in that list.
+
+SentryFeed relays the request instead of the browser calling Pwned Passwords directly, so visitors' IP addresses never reach HIBP and the page's security policy can forbid connections to any other site. Browsers only provide built-in hashing on HTTPS pages, so `templates/_sha1.js` is a small fallback for the Pi's plain-HTTP setup, tested against Node's SHA-1 on 5,000+ inputs.
+
 ## Scoring rules
 
 Signals are trusted in this order:
@@ -38,6 +48,7 @@ Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploit
 - **CISA's RSS feeds were discontinued.** Instead of a separate CISA source, KEV status comes from the `cisaExploitAdd` field in NVD's CVE records, the same API call that returns the score.
 - **Feed content is treated as untrusted input.** Jinja escapes everything in the list, the detail panel only writes text with `textContent`, and any link that isn't `http` or `https` is dropped, so a compromised feed can't inject script or a `javascript:` link. Tested with a planted `<script>` headline.
 - **The Pi 3B has 1 GB of RAM**, so there is no framework beyond Flask, no JavaScript build step, and the collector runs as a one-shot job instead of a resident process.
+- **A strict Content Security Policy.** Every page gets a fresh random nonce, and only scripts and styles carrying it may run. Pages may only connect back to this server, so the password page physically can't send anything elsewhere.
 - **systemd over cron.** It keeps the dashboard alive, restarts it on failure, starts it on boot, and logs every collector run to the journal. Both units are sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`) so they can only write inside the project folder.
 
 ## Setup
@@ -73,7 +84,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 
 ## Planned
 
-- A password checker using HIBP's Pwned Passwords. The browser hashes the password and sends only the first 5 characters of the hash, so the password never leaves the device.
 - A file and link checker. The file's fingerprint is calculated in the browser and checked against VirusTotal; the file itself is never uploaded.
 - A world map that places incidents geographically.
 - Share-price impact for public companies named in a breach.

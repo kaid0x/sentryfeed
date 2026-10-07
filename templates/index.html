@@ -1,50 +1,8 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SentryFeed</title>
-<style>
-  :root {
-    color-scheme: dark;
-    --bg: #0b0d10;
-    --panel: #12151a;
-    --panel-hover: #181c22;
-    --line: #232830;
-    --text: #e4e7eb;
-    --muted: #8a929c;
-    --red: #f0524f;
-    --orange: #f5903d;
-    --yellow: #e5c243;
-    --green: #4cc38a;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  [hidden] { display: none !important; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.5 var(--sans);
-    display: flex;
-    flex-direction: column;
-  }
-  a { color: inherit; }
-  button { font: inherit; color: inherit; }
-  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+{% extends "base.html" %}
+{% set active = "feed" %}
 
-  /* Header */
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px 20px;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--line);
-  }
-  .brand { font: 600 17px var(--mono); letter-spacing: 0.04em; margin: 0; }
-  .brand span { color: var(--red); }
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
   .updated { font: 12px var(--mono); color: var(--muted); }
   .windows { margin-left: auto; display: flex; gap: 4px; }
   .windows a {
@@ -120,11 +78,6 @@
   .sev-tag { color: var(--sev); text-transform: uppercase; letter-spacing: 0.05em; }
   .kev-tag { color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 0 4px; }
 
-  .sev-red    { --sev: var(--red); }
-  .sev-orange { --sev: var(--orange); }
-  .sev-yellow { --sev: var(--yellow); }
-  .sev-green  { --sev: var(--green); }
-
   /* Detail pane */
   .detail { overflow-y: auto; padding: 28px 36px 40px; }
   .detail-inner { max-width: 720px; }
@@ -171,24 +124,22 @@
     .feed { border-right: 0; overflow: visible; }
     .detail { padding: 20px 16px 24px; border-bottom: 1px solid var(--line); }
     .detail h2 { font-size: 19px; }
-    header { padding: 12px 16px; }
     .windows { margin-left: 0; width: 100%; }
-    body { height: auto; }
   }
 </style>
-</head>
-<body>
+{% endblock %}
 
-<header>
-  <h1 class="brand">SENTRY<span>/</span>FEED</h1>
+{% block header_extra %}
   <span class="updated">{% if updated %}updated {{ updated }}{% else %}no data yet{% endif %}{% if kev_count %} · {{ kev_count }} actively exploited{% endif %}</span>
   <nav class="windows" aria-label="Time window">
     {% for d, label in windows %}
       <a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
-</header>
+{% endblock %}
 
+{% block body %}
+<h1 class="sr-only">SentryFeed threat feed</h1>
 <div class="tiles" id="tiles">
   {% for key, label in severities %}
     <button class="tile sev-{{ key }}" data-sev="{{ key }}" aria-pressed="false">
@@ -229,8 +180,10 @@
     <p class="empty">Nothing in this time window yet. Run <code>python collect.py</code> on the Pi, then refresh.</p>
   {% endif %}
 </main>
+{% endblock %}
 
-<script>
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
   const ITEMS = {{ items | tojson }};
   const LABELS = {{ dict(severities) | tojson }};
 
@@ -310,5 +263,4 @@
     if (first !== null) show(Number(first));
   });
 </script>
-</body>
-</html>
+{% endblock %}

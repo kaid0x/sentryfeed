@@ -1,12 +1,18 @@
+import re
+import secrets
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
-from flask import Flask, jsonify, render_template, request
+import requests
+from flask import Flask, Response, g, jsonify, render_template, request
 
 from db import DB_PATH, connect
 
 app = Flask(__name__)
+
+PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
+HASH_PREFIX_RE = re.compile(r"^[0-9A-F]{5}$")
 
 # Order matters: this is the sort order and the order of the filter tiles.
 SEVERITIES = [
@@ -79,6 +85,33 @@ def window_days():
     return days if days in dict(WINDOWS) else DEFAULT_DAYS
 
 
+@app.before_request
+def make_csp_nonce():
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def inject_csp_nonce():
+    return {"csp_nonce": g.get("csp_nonce", "")}
+
+
+@app.after_request
+def security_headers(resp):
+    """Only scripts and styles carrying this request's nonce may run, and pages may
+    only talk to this server. So even if feed content slipped past escaping, it
+    couldn't run script, and the password page can't send anything anywhere else."""
+    nonce = g.get("csp_nonce", "")
+    resp.headers["Content-Security-Policy"] = (
+        f"default-src 'self'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; "
+        "img-src 'self' data:; connect-src 'self'; base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'"
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["X-Frame-Options"] = "DENY"
+    return resp
+
+
 @app.route("/")
 def index():
     days = window_days()
@@ -99,6 +132,35 @@ def index():
 def api_items():
     """Same data as JSON. The world map will read from here later."""
     return jsonify(load_items(window_days()))
+
+
+@app.route("/password")
+def password():
+    return render_template("password.html")
+
+
+@app.route("/api/pwned/<prefix>")
+def pwned_range(prefix):
+    """Relay a 5-character hash prefix to Pwned Passwords. The browser never sends
+    anything more, so this server can't learn the password either. Relaying (rather
+    than the browser calling HIBP directly) keeps visitors' IPs away from HIBP and
+    lets the page's security policy forbid connections to any other site."""
+    prefix = prefix.upper()
+    if not HASH_PREFIX_RE.match(prefix):
+        return jsonify(error="expected 5 hex characters"), 400
+    try:
+        upstream = requests.get(
+            PWNED_RANGE_URL.format(prefix),
+            # Padding adds fake entries so the response size doesn't hint at the prefix.
+            headers={"Add-Padding": "true", "User-Agent": "SentryFeed"},
+            timeout=10,
+        )
+        upstream.raise_for_status()
+    except requests.RequestException:
+        return jsonify(error="breach database unreachable"), 502
+    resp = Response(upstream.text, mimetype="text/plain")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 if __name__ == "__main__":
