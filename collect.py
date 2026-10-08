@@ -4,6 +4,7 @@ from db import connect, count_by_category, cve_stats, save_items
 from enrich import enrich
 from fetch import fetch_all
 from score import score_all
+from stocks import update as update_stocks
 
 MAX_AGE_DAYS = 14      # ignore anything older; MSRC alone publishes its whole history
 MAX_PER_SOURCE = 100   # safety cap so one noisy feed can't flood the database
@@ -37,6 +38,13 @@ def main():
     print(f"CVE lookups: {lookups['looked_up']} done, {lookups['pending']} still pending{note}")
 
     severity = score_all(conn)
+
+    # Optional extra: never let it stop the rest of the run.
+    try:
+        update_stocks(conn)
+    except Exception as e:
+        print(f"Stocks: failed ({e.__class__.__name__}: {e})")
+
     stats = cve_stats(conn)
     counts = count_by_category(conn)
     conn.close()

@@ -97,6 +97,9 @@
   .geo { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 12.5px var(--mono); color: var(--muted); margin: -12px 0 20px; }
   .geo a { color: var(--text); }
   .geo .blamed { color: var(--purple); }
+  .stock { font: 12.5px var(--mono); color: var(--muted); margin: -12px 0 20px; }
+  .stock strong { color: var(--text); font-weight: 600; }
+  .stock a { color: var(--text); }
   .cves { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 20px; }
   .cves a {
     font: 12px var(--mono);
@@ -189,6 +192,7 @@
         <h2 id="d-title"></h2>
         <div class="meta" id="d-meta"></div>
         <div class="geo" id="d-geo" hidden></div>
+        <p class="stock" id="d-stock" hidden></p>
         <div class="cves" id="d-cves"></div>
         <p class="summary" id="d-summary"></p>
         <a class="read" id="d-link" target="_blank" rel="noopener noreferrer">Read the article ↗</a>
@@ -253,6 +257,27 @@
       geo.append(a);
     }
     geo.hidden = !(where.length || blamed.length);
+
+    const stock = $("d-stock");
+    stock.replaceChildren();
+    if (item.stock) {
+      const s = item.stock;
+      const pct = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+      stock.append("Stock: " + s.company + " (" + s.ticker + ") ");
+      if (s.change !== null) {
+        const strong = document.createElement("strong");
+        strong.textContent = pct(s.change);
+        stock.append(strong, " since the story · S&P 500 " + pct(s.market_change));
+      } else {
+        stock.append("price data pending");
+      }
+      if (s.sec) stock.append(" · SEC breach filing");
+      const a = document.createElement("a");
+      a.href = "/stocks";
+      a.textContent = "See stock impact";
+      stock.append(" · ", a);
+    }
+    stock.hidden = !item.stock;
 
     const cves = $("d-cves");
     cves.replaceChildren();

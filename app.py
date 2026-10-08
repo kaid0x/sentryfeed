@@ -10,6 +10,7 @@ from flask import Flask, Response, g, jsonify, render_template, request
 from db import DB_PATH, connect
 from dedupe import group_stories
 from geo import NAMES as COUNTRY_NAMES, locate
+import stocks
 
 app = Flask(__name__)
 
@@ -78,7 +79,7 @@ def load_items_ungrouped(days):
 
 
 # What the page needs about each other outlet covering a story.
-ALSO_FIELDS = ("source", "title", "link", "age", "match")
+ALSO_FIELDS = ("id", "source", "title", "link", "age", "match")
 
 
 def load_items(days):
@@ -147,6 +148,7 @@ def index():
     days = window_days()
     items = load_items(days)
     counts = Counter(i["severity"] for i in items)
+    attach_stock_summaries(items)
     return render_template(
         "index.html",
         items=items,
@@ -157,6 +159,45 @@ def index():
         severities=SEVERITIES,
         windows=WINDOWS,
         days=days,
+        updated=last_updated(),
+    )
+
+
+def load_incidents():
+    conn = connect()
+    try:
+        return stocks.incidents(conn)
+    finally:
+        conn.close()
+
+
+def attach_stock_summaries(items):
+    """Give each feed story that names a breached US-listed company a one-line stock summary."""
+    by_item = {}
+    for inc in load_incidents():
+        summary = {k: inc[k] for k in ("company", "ticker", "change", "market_change")}
+        summary["sec"] = bool(inc["filings"])
+        for story in inc["stories"]:
+            by_item.setdefault(story["item_id"], summary)
+    for item in items:
+        for member_id in [item["id"], *(m["id"] for m in item["also"])]:
+            if member_id in by_item:
+                item["stock"] = by_item[member_id]
+                break
+
+
+@app.route("/stocks")
+def stock_impact():
+    incidents = load_incidents()
+    for inc in incidents:
+        for story in inc["stories"]:
+            story["link"] = safe_link(story["link"])
+    return render_template(
+        "stocks.html",
+        incidents=incidents,
+        has_prices_key=bool(stocks.av_key()),
+        has_sec_contact=bool(stocks.sec_contact()),
+        lookback=stocks.LOOKBACK_DAYS,
         updated=last_updated(),
     )
 

@@ -1,6 +1,8 @@
 # Local data and secrets: never commit these
 sentryfeed.db
 .nvd_api_key
+.alphavantage_key
+.sec_contact
 
 venv/
 __pycache__/

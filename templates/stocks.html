@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% set active = "stocks" %}
+
+{% block title %}Stock impact · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .updated { font: 12px var(--mono); color: var(--muted); }
+  .page { flex: 1; overflow-y: auto; padding: 28px 20px 48px; }
+  .page-inner { max-width: 1180px; margin: 0 auto; }
+  .page h1 { font-size: 24px; margin: 0 0 8px; font-weight: 600; }
+  .lede { color: #c5cad1; margin: 0 0 24px; max-width: 760px; }
+
+  .notice {
+    border: 1px solid var(--line); border-left: 3px solid var(--yellow); background: var(--panel);
+    padding: 12px 14px; margin: 0 0 20px; font-size: 14px; color: #c5cad1; max-width: 760px;
+  }
+  .notice code { font: 13px var(--mono); color: var(--text); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr)); gap: 16px; align-items: start; }
+  .card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 18px 18px 14px; min-width: 0; }
+  .card-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0 0 6px; }
+  .card-head h2 { font-size: 18px; margin: 0; font-weight: 600; }
+  .ticker { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+  .date { font: 12px var(--mono); color: var(--muted); margin-left: auto; }
+  .story { margin: 0 0 14px; font-size: 14px; }
+  .story a { text-decoration: none; border-left: 3px solid var(--sev); padding-left: 9px; display: block; }
+  .story a:hover .story-title { text-decoration: underline; }
+  .story-meta { display: block; font: 11.5px var(--mono); color: var(--muted); margin-top: 3px; }
+
+  .figure { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; margin: 0 0 2px; }
+  .change { font: 600 30px/1.1 var(--sans); font-variant-numeric: tabular-nums; }
+  .change-label { font-size: 13px; color: var(--muted); }
+  .market { font-size: 13px; color: #c5cad1; margin: 0 0 10px; font-variant-numeric: tabular-nums; }
+  .pending { font-size: 13.5px; color: var(--muted); margin: 6px 0 12px; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font: 12px var(--mono); color: var(--muted); margin: 0 0 4px; padding: 0; list-style: none; }
+  .legend li { display: inline-flex; align-items: center; gap: 6px; }
+  .key { width: 18px; height: 0; border-top: 2px solid var(--text); display: inline-block; }
+  .key.market-key { border-top: 2px dashed var(--muted); }
+
+  .chart { position: relative; }
+  .chart:focus { outline: none; }
+  .chart:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: 4px; }
+  .chart svg { width: 100%; height: auto; display: block; overflow: visible; }
+  .grid-line { stroke: var(--line); stroke-width: 1; }
+  .zero-line { stroke: #3a414c; stroke-width: 1; }
+  .axis-label { fill: var(--muted); font: 10px var(--mono); }
+  .story-line { stroke: var(--purple); stroke-width: 1; stroke-dasharray: 3 3; }
+  .story-label { fill: var(--purple); font: 10px var(--mono); }
+  .line-stock { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .line-market { fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; stroke-linejoin: round; }
+  .cross { stroke: var(--muted); stroke-width: 1; }
+  .dot-stock { fill: var(--text); stroke: var(--panel); stroke-width: 2; }
+  .dot-market { fill: var(--muted); stroke: var(--panel); stroke-width: 2; }
+  .tip {
+    position: absolute; top: 0; pointer-events: none; background: var(--bg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 6px 9px; font: 12px var(--mono); color: var(--muted); white-space: nowrap;
+  }
+  .tip strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tip .row { display: flex; align-items: center; gap: 6px; }
+
+  .sec { font-size: 13px; color: #c5cad1; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+  .sec .label { font: 11.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-right: 6px; }
+  .sec a { color: var(--text); }
+  .sec .muted { color: var(--muted); }
+
+  details { margin-top: 10px; font-size: 13px; }
+  summary { cursor: pointer; color: var(--muted); font: 12px var(--mono); }
+  summary:hover { color: var(--text); }
+  table { border-collapse: collapse; width: 100%; margin-top: 8px; font: 12px var(--mono); font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 400; }
+  tr.story-row td { color: var(--purple); }
+
+  .empty { color: var(--muted); }
+  .credit { font-size: 13px; color: var(--muted); margin: 28px 0 0; max-width: 760px; }
+
+  @media (max-width: 560px) {
+    .page { padding: 22px 12px 36px; }
+    .card { padding: 14px 12px 12px; }
+    .change { font-size: 26px; }
+    .date { margin-left: 0; width: 100%; }
+  }
+</style>
+{% endblock %}
+
+{% block header_extra %}
+  <span class="updated">last {{ lookback }} days{% if updated %} · updated {{ updated }}{% endif %}</span>
+{% endblock %}
+
+{% block body %}
+<main class="page">
+  <div class="page-inner">
+    <h1>Stock impact</h1>
+    <p class="lede">US-listed companies named as breach victims in the last {{ lookback }} days. Each chart starts at the last closing price before the story (0%) and compares the share price with the S&amp;P 500 over the same days. Prices move for many reasons, so this shows what happened around the story, not what caused it.</p>
+
+    {% if not has_sec_contact %}
+      <p class="notice">This needs a contact for the SEC, which asks every automated visitor to identify themselves. On the Pi, put a name and email in <code>.sec_contact</code>, for example <code>SentryFeed yourname@example.com</code>. See the README.</p>
+    {% elif not has_prices_key %}
+      <p class="notice">Breaches and SEC filings are tracked, but share prices need a free Alpha Vantage key in <code>.alphavantage_key</code> on the Pi. See the README.</p>
+    {% endif %}
+
+    {% if incidents %}
+      <div class="cards">
+        {% for inc in incidents %}
+          {% set lead = inc.stories[0] %}
+          <article class="card" aria-labelledby="co-{{ loop.index }}">
+            <div class="card-head">
+              <h2 id="co-{{ loop.index }}">{{ inc.company }}</h2>
+              <span class="ticker">{{ inc.ticker }}</span>
+              <span class="date">story {{ inc.date }}</span>
+            </div>
+            <p class="story sev-{{ lead.severity }}">
+              <a {% if lead.link %}href="{{ lead.link }}" target="_blank" rel="noopener noreferrer"{% endif %}>
+                <span class="story-title">{{ lead.title }}{% if lead.link %} ↗{% endif %}</span>
+                <span class="story-meta">{{ lead.source }}{% if inc.stories | length > 1 %} · +{{ inc.stories | length - 1 }} more {{ "story" if inc.stories | length == 2 else "stories" }}{% endif %}</span>
+              </a>
+            </p>
+
+            {% if inc.change is not none %}
+              {% set diff = (inc.change - inc.market_change) * 100 %}
+              <div class="figure">
+                <span class="change">{{ "%+.1f" | format(inc.change * 100) }}%</span>
+                <span class="change-label">since the story, through {{ inc.through }}</span>
+              </div>
+              <p class="market">S&amp;P 500 {{ "%+.1f" | format(inc.market_change * 100) }}% over the same days, so {{ "%.1f" | format(diff | abs) }} points {{ "better" if diff >= 0 else "worse" }} than the market.</p>
+            {% elif not has_prices_key %}
+              <p class="pending">No price data: needs an Alpha Vantage key.</p>
+            {% elif inc.base_day %}
+              <p class="pending">The market hasn't closed since the story yet.</p>
+            {% else %}
+              <p class="pending">Waiting for price data. Prices are fetched once a day.</p>
+            {% endif %}
+
+            {% if inc.points | length > 1 %}
+              <ul class="legend" aria-hidden="true">
+                <li><span class="key"></span>{{ inc.ticker }}</li>
+                <li><span class="key market-key"></span>S&amp;P 500 (SPY)</li>
+              </ul>
+              <div class="chart" data-index="{{ loop.index0 }}" tabindex="0" role="img"
+                   aria-label="{{ inc.company }} share price compared with the S&amp;P 500 around the story. Use the left and right arrow keys to read each day."></div>
+              <details>
+                <summary>Daily prices</summary>
+                <table>
+                  <thead><tr><th scope="col">Day</th><th scope="col">{{ inc.ticker }} close</th><th scope="col">{{ inc.ticker }}</th><th scope="col">S&amp;P 500</th></tr></thead>
+                  <tbody>
+                    {% set base = (inc.points | selectattr("day", "equalto", inc.base_day) | first) if inc.base_day else inc.points[0] %}
+                    {% for p in inc.points %}
+                      <tr{% if p.day == inc.base_day %} class="story-row"{% endif %}>
+                        <td>{{ p.day }}{% if p.day == inc.base_day %} (before story){% endif %}</td>
+                        <td>${{ "%.2f" | format(p.close) }}</td>
+                        <td>{{ "%+.1f" | format((p.close / base.close - 1) * 100) }}%</td>
+                        <td>{{ "%+.1f" | format((p.market / base.market - 1) * 100) }}%</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </details>
+            {% endif %}
+
+            <p class="sec">
+              <span class="label">SEC</span>
+              {% if inc.filings %}
+                {% for f in inc.filings %}
+                  {% if not loop.first %} · {% endif %}<a href="{{ f.url }}" target="_blank" rel="noopener noreferrer">{{ f.form }} Item 1.05 filed {{ f.filed }} ↗</a>
+                {% endfor %}
+                <span class="muted">(material cybersecurity incident)</span>
+              {% elif inc.sec_checked %}
+                <span class="muted">No Item 1.05 breach filing within 30 days before or 60 days after the story.</span>
+              {% else %}
+                <span class="muted">Not checked yet.</span>
+              {% endif %}
+            </p>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty">No US-listed company has been named as a breach victim in the last {{ lookback }} days{% if not has_sec_contact %}, or this isn't set up yet{% endif %}.</p>
+    {% endif %}
+
+    <p class="credit">Companies and breach filings from the <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener noreferrer">SEC's EDGAR</a>; daily closing prices from <a href="https://www.alphavantage.co" target="_blank" rel="noopener noreferrer">Alpha Vantage</a>. Since December 2023, US-listed companies must file an 8-K under Item 1.05 within four business days of deciding a cyber incident is material. Not financial advice.</p>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const INCIDENTS = {{ incidents | tojson }};
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const H = 150, PAD = { l: 40, r: 10, t: 16, b: 20 };
+  const pct = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+
+  function node(tag, attrs, parent) {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) el.setAttribute(k, v);
+    if (parent) parent.append(el);
+    return el;
+  }
+
+  function niceStep(range) {
+    const raw = range / 3;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || raw;
+  }
+
+  function draw(box, inc) {
+    // Draw at the box's real width so labels stay 10px on a phone instead of shrinking.
+    const W = Math.max(280, Math.round(box.clientWidth));
+    const pts = inc.points;
+    const baseIndex = Math.max(0, pts.findIndex((p) => p.day === inc.base_day));
+    const base = pts[baseIndex];
+    const rows = pts.map((p) => ({ day: p.day, close: p.close, s: p.close / base.close - 1, m: p.market / base.market - 1 }));
+    let lo = Math.min(0, ...rows.map((r) => Math.min(r.s, r.m)));
+    let hi = Math.max(0, ...rows.map((r) => Math.max(r.s, r.m)));
+    if (hi - lo < 0.02) { hi += 0.01; lo -= 0.01; }
+    const step = niceStep(hi - lo);
+    lo = Math.floor(lo / step) * step;
+    hi = Math.ceil(hi / step) * step;
+    const x = (i) => PAD.l + (rows.length === 1 ? 0 : (i / (rows.length - 1)) * (W - PAD.l - PAD.r));
+    const y = (v) => PAD.t + (1 - (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
+
+    const svg = node("svg", { viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true" });
+    for (let v = lo; v <= hi + step / 2; v += step) {
+      const yy = y(v).toFixed(1);
+      node("line", { class: Math.abs(v) < step / 100 ? "zero-line" : "grid-line", x1: PAD.l, x2: W - PAD.r, y1: yy, y2: yy }, svg);
+      node("text", { class: "axis-label", x: PAD.l - 6, y: Number(yy) + 3, "text-anchor": "end" }, svg).textContent = pct(Math.round(v * 1000) / 1000);
+    }
+    // The story landed after this close: draw the marker halfway to the next day.
+    if (baseIndex < rows.length - 1) {
+      const sx = ((x(baseIndex) + x(baseIndex + 1)) / 2).toFixed(1);
+      node("line", { class: "story-line", x1: sx, x2: sx, y1: PAD.t - 4, y2: H - PAD.b }, svg);
+      node("text", { class: "story-label", x: Number(sx) + 4, y: PAD.t - 6 }, svg).textContent = "story";
+    }
+    [rows[0], rows[rows.length - 1]].forEach((r, k) => {
+      node("text", { class: "axis-label", x: x(k ? rows.length - 1 : 0), y: H - 4, "text-anchor": k ? "end" : "start" }, svg).textContent = r.day.slice(5);
+    });
+    const path = (key) => rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + y(r[key]).toFixed(1)).join(" ");
+    node("path", { class: "line-market", d: path("m") }, svg);
+    node("path", { class: "line-stock", d: path("s") }, svg);
+
+    // Hover and keyboard readout: a crosshair that snaps to the nearest trading day.
+    const cross = node("line", { class: "cross", y1: PAD.t, y2: H - PAD.b, visibility: "hidden" }, svg);
+    const dm = node("circle", { class: "dot-market", r: 4, visibility: "hidden" }, svg);
+    const ds = node("circle", { class: "dot-stock", r: 4.5, visibility: "hidden" }, svg);
+    box.append(svg);
+
+    const tip = document.createElement("div");
+    tip.className = "tip";
+    tip.hidden = true;
+    box.append(tip);
+
+    function line(value, label, cls) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const key = document.createElement("span");
+      key.className = cls;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      row.append(key, strong, document.createTextNode(" " + label));
+      return row;
+    }
+
+    let current = rows.length - 1;
+    function show(i) {
+      current = i;
+      const r = rows[i];
+      for (const el of [cross, dm, ds]) el.setAttribute("visibility", "visible");
+      cross.setAttribute("x1", x(i)); cross.setAttribute("x2", x(i));
+      ds.setAttribute("cx", x(i)); ds.setAttribute("cy", y(r.s));
+      dm.setAttribute("cx", x(i)); dm.setAttribute("cy", y(r.m));
+      const head = document.createElement("div");
+      head.textContent = r.day + (i === baseIndex ? " · last close before story" : "");
+      tip.replaceChildren(
+        head,
+        line(pct(r.s), inc.ticker + " ($" + r.close.toFixed(2) + ")", "key"),
+        line(pct(r.m), "S&P 500", "key market-key"),
+      );
+      tip.hidden = false;
+      // Sit beside the crosshair, inside the chart, flipping sides near the right edge.
+      const left = x(i) * (box.clientWidth / W);
+      const width = tip.offsetWidth;
+      const place = left + 12 + width <= box.clientWidth ? left + 12 : left - 12 - width;
+      tip.style.left = Math.max(0, place) + "px";
+      tip.style.top = PAD.t + "px";
+    }
+    function hide() {
+      for (const el of [cross, dm, ds]) el.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    }
+    box.addEventListener("pointermove", (e) => {
+      const rect = box.getBoundingClientRect();
+      const px = ((e.clientX - rect.left) / rect.width) * W;
+      const i = Math.round(((px - PAD.l) / (W - PAD.l - PAD.r)) * (rows.length - 1));
+      show(Math.min(rows.length - 1, Math.max(0, i)));
+    });
+    box.addEventListener("pointerleave", hide);
+    box.addEventListener("focus", () => show(current));
+    box.addEventListener("blur", hide);
+    box.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        show(Math.min(rows.length - 1, Math.max(0, current + (e.key === "ArrowRight" ? 1 : -1))));
+      }
+    });
+  }
+
+  document.querySelectorAll(".chart").forEach((box) => draw(box, INCIDENTS[Number(box.dataset.index)]));
+})();
+</script>
+{% endblock %}

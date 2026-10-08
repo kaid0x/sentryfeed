@@ -25,6 +25,8 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
 
 app.py ──> dedupe.py   group the same story from different outlets
        └─> geo.py      find the countries each story is about, for the map
+
+collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
 ```
 
 - **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review. The list lives in `feeds.py`.
@@ -78,6 +80,17 @@ Clicking a country lists its stories, split into "Happened here" and "Blamed her
 
 The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (public domain). `tools/build_world.mjs` turns it into a static SVG once, offline, so the Pi serves a 120 KB file and loads nothing from other sites. Countries too small for the light 1:110m outlines, like Singapore and Bahrain, appear as dots when a story mentions them.
 
+## Stock impact
+
+`/stocks` follows US-listed companies named as breach victims over the last 90 days:
+
+- **The share price around the story,** as a chart starting at the last close before the story (0%), next to the S&P 500 over the same days. The headline number is the change since the story, plus how far ahead of or behind the market it is. Prices move for many reasons, so the page shows what happened around the story, never that the breach caused it.
+- **The company's own breach filing.** Since December 2023, US-listed companies must file an 8-K under Item 1.05 within four business days of deciding a cyber incident is material. If one was filed within 30 days before or 60 days after the story, the card links straight to it on the SEC's site.
+
+**Spotting the victim.** Company names come from the SEC's list of every US-listed company, shortened from legal names ("CLOROX CO /DE/" → "Clorox"), plus brands headlines use instead ("Ticketmaster" → Live Nation, "Change Healthcare" → UnitedHealth). A company only counts when the headline names it as the victim: "AT&T confirms data breach" and "Hackers breach Snowflake customers" count, but "Cisco patches critical flaw" and "Hackers abuse Microsoft Teams" don't, since there the company makes the product rather than suffering the breach. Several stories about the same company within 72 hours are one incident.
+
+**Data and limits.** The collector checks each company's SEC filings and Alpha Vantage prices at most once a day, newest stories first, stopping at 20 price lookups a day (the free key allows 25) and for the rest of the day if Alpha Vantage says the limit is reached. `python stocks.py` runs an update by hand and prints every incident with its numbers.
+
 ## Merging duplicate stories
 
 `dedupe.py` groups articles from different outlets that cover the same story. Two articles match when they come from different sources, were published within 72 hours of each other, and either mention the same CVE or have similar titles.
@@ -107,6 +120,12 @@ pip install -r requirements.txt
 # Optional but recommended: a free NVD API key raises the rate limit 10x
 echo 'YOUR-KEY' > .nvd_api_key && chmod 600 .nvd_api_key
 
+# Optional, for the stock impact page:
+# the SEC asks automated visitors to identify themselves with a name and email
+echo 'SentryFeed you@example.com' > .sec_contact && chmod 600 .sec_contact
+# and share prices need a free key from https://www.alphavantage.co/support/#api-key
+echo 'YOUR-KEY' > .alphavantage_key && chmod 600 .alphavantage_key
+
 python collect.py          # first run
 python app.py              # dashboard on port 5000, Ctrl+C to stop
 ```
@@ -126,8 +145,9 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
+- Stock impact covers US-listed companies only, and only spots a victim named in the headline. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link.
 
 ## Planned
 
-- Share-price impact for public companies named in a breach.
+- Stock impact for companies on other exchanges, such as Dubai (DFM), Abu Dhabi (ADX) and London (LSE). Each needs its own list of listed companies, a price source that covers it, and handling for different currencies and trading days.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.

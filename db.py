@@ -29,6 +29,41 @@ CREATE TABLE IF NOT EXISTS cve_cache (
     kev         INTEGER NOT NULL DEFAULT 0,
     checked_at  TEXT NOT NULL
 );
+
+-- Stock impact (stocks.py). Public data only: the SEC's list of listed companies,
+-- their breach filings, and daily closing prices.
+CREATE TABLE IF NOT EXISTS companies (
+    cik         INTEGER PRIMARY KEY,   -- the SEC's company ID
+    ticker      TEXT NOT NULL,
+    name        TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
+CREATE TABLE IF NOT EXISTS stock_events (   -- a story naming a company as a breach victim
+    item_id     INTEGER NOT NULL,
+    cik         INTEGER NOT NULL,
+    matched     TEXT NOT NULL,          -- the words in the headline that named it
+    PRIMARY KEY (item_id, cik)
+);
+CREATE TABLE IF NOT EXISTS prices (
+    ticker      TEXT NOT NULL,
+    day         TEXT NOT NULL,          -- trading day, YYYY-MM-DD
+    close       REAL NOT NULL,
+    PRIMARY KEY (ticker, day)
+);
+CREATE TABLE IF NOT EXISTS sec_filings (    -- 8-Ks reporting a material cyber incident (Item 1.05)
+    accession   TEXT PRIMARY KEY,
+    cik         INTEGER NOT NULL,
+    form        TEXT NOT NULL,
+    filed       TEXT NOT NULL,
+    url         TEXT NOT NULL
+);
+-- When each outside lookup last ran, so each one happens at most once a day.
+CREATE TABLE IF NOT EXISTS lookups (
+    kind        TEXT NOT NULL,          -- 'prices', 'sec', 'companies'
+    key         TEXT NOT NULL,          -- ticker, CIK, or 'all'
+    day         TEXT NOT NULL,          -- UTC date of the lookup
+    PRIMARY KEY (kind, key)
+);
 """
 
 
