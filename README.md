@@ -160,4 +160,5 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 ## Planned
 
 - Stock impact for companies on other exchanges, such as Dubai (DFM), Abu Dhabi (ADX) and London (LSE). Each needs its own list of listed companies, a price source that covers it, and handling for different currencies and trading days.
+- A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
