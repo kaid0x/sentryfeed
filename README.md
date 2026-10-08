@@ -82,7 +82,7 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 On Raspberry Pi OS Lite (64-bit), as a user named `kaido` (change the paths in `deploy/` if yours differs):
 
 ```bash
-git clone https://github.com/<you>/sentryfeed.git ~/sentryfeed
+git clone https://github.com/kaid0x/sentryfeed.git ~/sentryfeed
 cd ~/sentryfeed
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
