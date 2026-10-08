@@ -74,7 +74,7 @@ Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploit
 
 Clicking a country lists its stories, split into "Happened here" and "Blamed here", and each story in the feed shows its countries with a link to the map.
 
-`geo.py` reads only the title and the first two sentences of the summary, because later sentences tend to mention countries in passing (where a researcher is based, older incidents). Matching is case-sensitive, so "US" isn't "us" and "Polish" isn't "polish". Tech news and events aren't mapped, and the page says how many stories named no country. Run `python geo.py` to print what it finds in your database.
+`geo.py` reads only the title and the first two sentences of the summary, because later sentences tend to mention countries in passing (where a researcher is based, older incidents). Matching is case-sensitive, so "US" isn't "us" and "Polish" isn't "polish". Tech news and events aren't mapped, and the page says how many stories named no country. Run `python geo.py` to print what it finds in your database, including the words that made each country blamed. A few phrases are skipped as places: a CISA warning names the US but isn't a US incident, and Pwn2Own Ireland is a contest, not an attack.
 
 The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (public domain). `tools/build_world.mjs` turns it into a static SVG once, offline, so the Pi serves a 120 KB file and loads nothing from other sites. Countries too small for the light 1:110m outlines, like Singapore and Bahrain, appear as dots when a story mentions them.
 

@@ -160,20 +160,46 @@ GROUP_COUNTRY = [
     (r"Ghostwriter|UNC1151", "BY"),
 ]
 
+GROUPS = "|".join(pattern for pattern, _ in GROUP_COUNTRY)
+# Intelligence and military agencies: "Russia's GRU", "China's MSS".
+AGENCIES = r"GRU|FSB|SVR|MSS|IRGC|MOIS|RGB|PLA|Unit \d{4,5}"
+# Tracking codes that sit between a country and an attacker word:
+# "Chinese APT41 hackers", "China-aligned TA419", "Russia-linked UAC-0099".
+CODES = r"[A-Z][A-Za-z]*-?\d+|[A-Z]{2,}[A-Z0-9]*"
+# At most one name or code may sit in between. It has to look like one, so a
+# headline's ordinary capitalised words don't count: "Denmark Says Attackers..."
+BETWEEN = rf"(?:(?:{GROUPS}|{AGENCIES}|{CODES})\s+)?"
+
 # Words that make a country the one being blamed when they follow it:
 # "Chinese hackers", "Russian state-sponsored threat actors", "North Korean IT workers".
 ACTOR = (
-    r"(?:(?:state|government|military|nation)[- ](?:sponsored|backed|linked|aligned) |"
-    r"(?:military|intelligence|cyber|cyberespionage|espionage|ransomware|cybercrime|hacking) )?"
+    r"(?:(?:state|government|military|nation)(?:[- ](?:sponsored|backed|linked|aligned))? |"
+    r"(?:military|intelligence|cyber|cyberespionage|espionage|ransomware|cybercrime|hacking|scam) )?"
     r"(?:hackers?|hacktivists?|hacking (?:group|crew|team|unit)s?|apts?|threat (?:actors?|groups?|clusters?)|"
-    r"(?:cyber ?)?(?:spies|criminals|crooks)|spy (?:agency|agencies)|operatives|"
-    r"(?:it|tech) workers|attackers|cyber ?(?:army|units?|actors?)|gangs?|crews?|nation[- ]state)"
+    r"(?:cyber ?)?(?:spies|criminals|crooks)|cybercriminals?|spy (?:agency|agencies)|operatives|"
+    r"(?:it|tech) workers|attackers|cyber ?(?:army|units?|actors?)|gangs?|crews?|cybercrime forums?)"
 )
 # Weaker words that only count after an adjective ("Russian cyberattacks"), since
 # after a noun they usually describe the victim ("US hospital attacks").
-ACTOR_AFTER_ADJECTIVE = r"(?:cyber ?attacks?|attacks?|campaigns?|operations?|malware|espionage|groups?|intrusions?|influence)"
-# Words that tie a country to an attack when joined to it: "China-linked", "Iran-backed".
-LINKED = r"(?:linked|backed|aligned|nexus|sponsored|affiliated|tied|speaking|based (?:hackers|threat actors|groups?))"
+ACTOR_AFTER_ADJECTIVE = (
+    r"(?:cyber ?attacks?|attacks?|malware|espionage|intrusions?|disinformation|"
+    r"(?:espionage|phishing|hacking|influence|malware|disinformation|cyber|ransomware) (?:campaigns?|operations?))"
+)
+# Joined to a country these tie it to an attack ("China-linked", "Iran-backed"), but
+# only when attacker wording follows: "U.K.-linked academics" are not attackers.
+LINKED = r"(?:linked|backed|aligned|nexus|sponsored|affiliated|speaking|based)"
+AFTER_LINKED = (
+    rf"(?:{GROUPS}|{AGENCIES}|{CODES}|"
+    rf"(?:[\w-]+\s+){{0,2}}?(?i:{ACTOR}|{ACTOR_AFTER_ADJECTIVE}|groups?|clusters?|actors?|"
+    r"campaigns?|operations?|activity|intrusion sets?|threats?))"
+)
+# Phrases that name a country without it being where anything happened, blanked
+# out first: CISA is a US agency, but a CISA warning isn't a US incident.
+NOT_A_PLACE = re.compile(
+    r"(?:the )?U\.?S\.? (?:Cybersecurity and Infrastructure Security Agency|CISA)|"
+    r"U\.?S\.? [Ff]ederal (?:[Cc]ivilian )?agencies|Federal Civilian Executive Branch|"
+    r"Pwn2Own \w+"
+)
 
 
 def _alternation(words):
@@ -199,16 +225,19 @@ _NOT_US = r"(?<!Latin )(?<!North )(?<!South )(?<!Central )(?<!Bank of )"
 _B, _E = r"(?<![\w.])", r"(?![\w])"
 
 MENTION_RE = re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY}){_E}")
+_POSSESSIVE = r"(?:['’]s)?"
 BLAMED_RES = [
-    # "Chinese hackers", "North Korea's Lazarus hackers", "Russian GRU hackers"
-    re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY})(?:'s)?(?:[- ]{LINKED})?\s+(?:[A-Z][\w-]*\s+)?(?i:{ACTOR}){_E}"),
+    # "Chinese hackers", "North Korea's IT workers", "Russian GRU hackers"
+    re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY}){_POSSESSIVE}\s+{BETWEEN}(?i:{ACTOR}){_E}"),
     # "Russian cyberattacks", "Iranian espionage campaign"
-    re.compile(rf"{_B}(?P<c>{_ADJ})\s+(?:[A-Z][\w-]*\s+)?(?i:{ACTOR_AFTER_ADJECTIVE}){_E}"),
-    # "China-linked", "Iran-backed", "Russia-nexus"
-    re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY})[- ](?i:{LINKED}){_E}"),
+    re.compile(rf"{_B}(?P<c>{_ADJ})\s+{BETWEEN}(?i:{ACTOR_AFTER_ADJECTIVE}){_E}"),
+    # "China-linked TA419", "Iran-backed hackers", "China-nexus espionage campaign"
+    re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY})[- ](?i:{LINKED})\s+{AFTER_LINKED}{_E}"),
+    # "Russia's Star Blizzard", "China's MSS", "Kremlin-backed Sandworm"
+    re.compile(rf"{_B}{_NOT_US}(?P<c>{_ANY}){_POSSESSIVE}(?:[- ](?i:{LINKED}))?\s+(?:{GROUPS}|{AGENCIES})\b"),
     # "linked to China", "attributed to Russian state hackers", "backed by Iran"
-    re.compile(rf"(?i:\b(?:linked|tied|attributed|traced|connected|blamed on|backed by|working for|on behalf of)"
-               rf"\s+(?:to\s+)?(?:the\s+)?){_NOT_US}(?P<c>{_ANY}){_E}"),
+    re.compile(rf"(?i:\b(?:linked to|attributed to|traced (?:back )?to|blamed on|backed by|sponsored by|"
+               rf"working for|on behalf of)\s+(?:the\s+)?){_NOT_US}(?P<c>{_ANY}){_E}"),
 ]
 GROUP_RES = [(re.compile(rf"\b(?:{pattern})\b"), code) for pattern, code in GROUP_COUNTRY]
 
@@ -225,19 +254,21 @@ def text_for(item):
     return f"{item['title']}. {' '.join(sentences[:2])}"
 
 
-def locate(item):
-    """Returns (where, blamed): sorted lists of country codes."""
-    text = text_for(item)
-    blamed, spans = set(), []
+def explain(item):
+    """Returns (where, blamed, reasons): sorted country codes, plus the words that
+    made each blamed country blamed, for checking the rules."""
+    text = NOT_A_PLACE.sub(lambda m: " " * len(m.group(0)), text_for(item))
+    reasons, spans = {}, []
     for regex in BLAMED_RES:
         for m in regex.finditer(text):
             code = _code(m.group("c"))
             if code:
-                blamed.add(code)
+                reasons.setdefault(code, m.group(0))
                 spans.append(m.span())
     for regex, code in GROUP_RES:
-        if regex.search(text):
-            blamed.add(code)
+        m = regex.search(text)
+        if m:
+            reasons.setdefault(code, m.group(0))
 
     # Blank out the blaming phrases, then every country still mentioned is where
     # it happened. A country can be both: "Russian hackers hit Russian banks".
@@ -245,7 +276,13 @@ def locate(item):
     for start, end in spans:
         chars[start:end] = " " * (end - start)
     where = {_code(m.group("c")) for m in MENTION_RE.finditer("".join(chars))} - {None}
-    return sorted(where), sorted(blamed)
+    return sorted(where), sorted(reasons), reasons
+
+
+def locate(item):
+    """Returns (where, blamed): sorted lists of country codes."""
+    where, blamed, _ = explain(item)
+    return where, blamed
 
 
 def main():
@@ -255,13 +292,14 @@ def main():
     items = [i for i in load_items_ungrouped(14) if i["severity"] in ("red", "orange", "yellow")]
     placed = 0
     for item in items:
-        where, blamed = locate(item)
+        where, blamed, reasons = explain(item)
         if not (where or blamed):
             continue
         placed += 1
         print(f"[{item['source']}] {item['title']}")
-        print(f"    where: {', '.join(NAMES[c] for c in where) or '-'}"
-              f"   blamed: {', '.join(NAMES[c] for c in blamed) or '-'}")
+        print(f"    where: {', '.join(NAMES[c] for c in where) or '-'}")
+        for code in blamed:
+            print(f"    blamed: {NAMES[code]}  (\"{' '.join(reasons[code].split())}\")")
     print(f"\n{placed} of {len(items)} security stories name a country.")
 
 
