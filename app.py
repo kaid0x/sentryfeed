@@ -24,6 +24,8 @@ SEVERITIES = [
     ("blue", "Events"),
 ]
 RANK = {key: i for i, (key, _) in enumerate(SEVERITIES)}
+# Events are rare, so their tile only appears when there's at least one to show.
+OPTIONAL_TILES = {"blue"}
 WINDOWS = [(1, "24h"), (3, "3 days"), (7, "7 days"), (14, "14 days")]
 DEFAULT_DAYS = 3
 
@@ -136,10 +138,12 @@ def security_headers(resp):
 def index():
     days = window_days()
     items = load_items(days)
+    counts = Counter(i["severity"] for i in items)
     return render_template(
         "index.html",
         items=items,
-        counts=Counter(i["severity"] for i in items),
+        counts=counts,
+        tiles=[(k, label) for k, label in SEVERITIES if counts[k] or k not in OPTIONAL_TILES],
         kev_count=sum(1 for i in items if i["kev"]),
         severities=SEVERITIES,
         windows=WINDOWS,

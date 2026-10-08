@@ -10,7 +10,7 @@ A self-hosted threat-intel dashboard running on a Raspberry Pi 3B. Every 30 minu
 | Orange | CVSS 7.0 to 8.9, or a serious incident (breach, ransomware, takeover) |
 | Yellow | Everything else that happened |
 | Green | Tech and AI news, not an incident |
-| Blue | Events: webinars, virtual events, guides and similar posts. Kept because they can be worth reading, but never counted as incidents |
+| Blue | Events: webinars, virtual events, guides and similar posts. Kept because they can be worth reading, but never counted as incidents. The tile only appears when there is at least one |
 
 The same story from several outlets is shown once, with the other outlets listed under it.
 

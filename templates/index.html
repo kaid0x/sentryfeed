@@ -19,7 +19,7 @@
   /* Severity tiles, doubling as filters */
   .tiles {
     display: grid;
-    grid-template-columns: repeat({{ severities | length }}, 1fr);
+    grid-template-columns: repeat({{ tiles | length }}, 1fr);
     gap: 1px;
     background: var(--line);
     border-bottom: 1px solid var(--line);
@@ -127,10 +127,12 @@
   .empty code { font-family: var(--mono); color: var(--text); }
 
   @media (max-width: 860px) {
-    /* 3 tiles on the first row, 2 wider ones on the second, no empty cell */
-    .tiles { grid-template-columns: repeat(6, 1fr); }
-    .tile { grid-column: span 2; padding: 10px 14px; }
-    .tile:nth-child(n+4) { grid-column: span 3; }
+    .tiles { grid-template-columns: repeat(2, 1fr); }
+    .tile { padding: 10px 14px; }
+    /* With 5 tiles: 3 on the first row, 2 wider ones on the second, no empty cell */
+    .tiles.count-5 { grid-template-columns: repeat(6, 1fr); }
+    .tiles.count-5 .tile { grid-column: span 2; }
+    .tiles.count-5 .tile:nth-child(n+4) { grid-column: span 3; }
     main { display: flex; flex-direction: column-reverse; }
     .feed { border-right: 0; overflow: visible; }
     .detail { padding: 20px 16px 24px; border-bottom: 1px solid var(--line); }
@@ -151,8 +153,8 @@
 
 {% block body %}
 <h1 class="sr-only">SentryFeed threat feed</h1>
-<div class="tiles" id="tiles">
-  {% for key, label in severities %}
+<div class="tiles count-{{ tiles | length }}" id="tiles">
+  {% for key, label in tiles %}
     <button class="tile sev-{{ key }}" data-sev="{{ key }}" aria-pressed="false">
       <span class="n">{{ counts.get(key, 0) }}</span>
       <span class="label">{{ label }}</span>
