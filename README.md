@@ -62,6 +62,14 @@ Signals are trusted in this order:
 
 **Events** are spotted by their titles (`[Virtual Event] ...`, `Webinar: ...`, Schneier's Friday squid post) and turn blue before any other rule runs, so a webinar called "Defending against zero-days" isn't counted as a zero-day.
 
+**Roundups and caps.** A few kinds of post would otherwise flood red:
+
+- Weekly roundups ("⚡ Weekly Recap", "ThreatsDay", "The Week in Ransomware") mention every serious story of the week, so they stay yellow.
+- Microsoft's feed re-lists every Chrome fix for Edge, a dozen at a time, scored 8.8 to 9.6. Without signs of exploitation they're capped at orange; Google's wording for a Chrome zero-day ("an exploit for CVE-… exists in the wild") still makes them red.
+- Pwn2Own "zero-days" are found at a hacking contest and handed straight to vendors, so they're capped at orange.
+
+CISA's exploited list always wins over a cap.
+
 **Negation.** A keyword doesn't count when it's being denied: "not a zero-day", "hasn't been exploited in the wild" and "no evidence it has been exploited in the wild" don't turn red. Only short filler words may sit between the negation and the keyword, so "Microsoft has not patched a zero-day" still does.
 
 Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploited`, `mentions 'zero-day'`), and the dashboard shows it. Everything is rescored on every run, so a score that arrives later or a keyword change applies to old items too.
@@ -147,7 +155,7 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
-- Stock impact covers US-listed companies only, and only spots a victim named in the headline. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link.
+- Stock impact covers US-listed companies only, and only spots a victim named in the headline. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
 

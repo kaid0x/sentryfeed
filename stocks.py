@@ -26,7 +26,8 @@ HERE = Path(__file__).parent
 AV_KEY_FILE = HERE / ".alphavantage_key"
 SEC_CONTACT_FILE = HERE / ".sec_contact"
 
-COMPANIES_URL = "https://www.sec.gov/files/company_tickers.json"
+COMPANIES_URL = "https://www.sec.gov/files/company_tickers_exchange.json"   # includes each exchange
+COMPANIES_FALLBACK_URL = "https://www.sec.gov/files/company_tickers.json"
 SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 FILING_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
 AV_URL = "https://www.alphavantage.co/query"
@@ -194,23 +195,44 @@ def _mark_looked_up(conn, kind, key, day=None):
     conn.commit()
 
 
+def _company_rows(contact):
+    """[(cik, ticker, name, exchange)], largest companies first. Uses the list with
+    exchanges, or the plain list (no exchanges) if that one fails."""
+    try:
+        resp = requests.get(COMPANIES_URL, headers={"User-Agent": contact}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        col = {name: i for i, name in enumerate(data["fields"])}
+        return [(int(r[col["cik"]]), r[col["ticker"]], r[col["name"]], r[col["exchange"]]) for r in data["data"]]
+    except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
+        resp = requests.get(COMPANIES_FALLBACK_URL, headers={"User-Agent": contact}, timeout=30)
+        resp.raise_for_status()
+        return [(int(e["cik_str"]), e["ticker"], e["title"], None) for e in resp.json().values()]
+
+
 def refresh_companies(conn, contact):
     """The SEC's list of every US-listed company and its ticker, refreshed weekly."""
-    row = conn.execute("SELECT day FROM lookups WHERE kind = 'companies'").fetchone()
+    row = conn.execute("SELECT day FROM lookups WHERE kind = 'companies' AND key = 'with-exchange'").fetchone()
     if row and date.fromisoformat(row["day"]) > date.today() - timedelta(days=REFRESH_COMPANIES_DAYS):
         return "up to date"
-    resp = requests.get(COMPANIES_URL, headers={"User-Agent": contact}, timeout=30)
-    resp.raise_for_status()
     rows, seen = [], set()
-    for entry in resp.json().values():   # listed largest first; keep each company's first ticker
-        cik = int(entry["cik_str"])
-        if cik in seen:
+    for cik, ticker, name, exchange in _company_rows(contact):
+        if cik in seen:          # keep each company's first (main) ticker
             continue
         seen.add(cik)
-        rows.append((cik, entry["ticker"].upper(), entry["title"]))
-    conn.execute("DELETE FROM companies")
-    conn.executemany("INSERT INTO companies (cik, ticker, name) VALUES (?, ?, ?)", rows)
-    _mark_looked_up(conn, "companies", "all")
+        rows.append((cik, ticker.upper(), name, exchange))
+    # Update in place so what fetch_filings learned (foreign_filer) survives the refresh.
+    conn.executemany(
+        """INSERT INTO companies (cik, ticker, name, exchange) VALUES (?, ?, ?, ?)
+           ON CONFLICT(cik) DO UPDATE SET ticker = excluded.ticker, name = excluded.name,
+                                          exchange = excluded.exchange""",
+        rows,
+    )
+    conn.execute("CREATE TEMP TABLE IF NOT EXISTS listed (cik INTEGER PRIMARY KEY)")
+    conn.execute("DELETE FROM listed")
+    conn.executemany("INSERT INTO listed (cik) VALUES (?)", [(c,) for c in seen])
+    conn.execute("DELETE FROM companies WHERE cik NOT IN (SELECT cik FROM listed)")
+    _mark_looked_up(conn, "companies", "with-exchange")
     return f"{len(rows)} companies"
 
 
@@ -235,11 +257,30 @@ def fetch_prices(conn, ticker, key):
     return None
 
 
+DOMESTIC_FORMS = {"10-K", "10-K/A", "10-Q", "10-Q/A", "8-K", "8-K/A"}
+FOREIGN_FORMS = {"20-F", "20-F/A", "40-F", "40-F/A", "6-K", "6-K/A"}
+
+
+def is_foreign_filer(submissions):
+    """True for companies that report to the SEC as foreign companies (annual 20-F,
+    news on 6-K). The Item 1.05 breach rule is for 8-K filers, so it doesn't apply
+    to them. A foreign-based company filing 10-Ks and 8-Ks is treated as domestic."""
+    forms = set(submissions.get("filings", {}).get("recent", {}).get("form", []))
+    if forms & DOMESTIC_FORMS:
+        return False
+    if forms & FOREIGN_FORMS:
+        return True
+    addresses = submissions.get("addresses") or {}
+    return any((a or {}).get("isForeignLocation") == 1 for a in addresses.values())
+
+
 def fetch_filings(conn, cik, contact):
     """Record the company's 8-K filings under Item 1.05 (material cybersecurity incident)."""
     resp = requests.get(SUBMISSIONS_URL.format(cik=cik), headers={"User-Agent": contact}, timeout=20)
     resp.raise_for_status()
-    recent = resp.json()["filings"]["recent"]
+    data = resp.json()
+    recent = data["filings"]["recent"]
+    conn.execute("UPDATE companies SET foreign_filer = ? WHERE cik = ?", (int(is_foreign_filer(data)), cik))
     found = 0
     for i, form in enumerate(recent["form"]):
         if form not in ("8-K", "8-K/A"):
@@ -412,7 +453,8 @@ def _series(conn, ticker, start, end):
 def incidents(conn):
     """One entry per company per incident, newest first, with price data ready to chart."""
     rows = conn.execute(
-        """SELECT e.item_id, e.cik, c.ticker, c.name, i.title, i.link, i.source, i.published, i.severity
+        """SELECT e.item_id, e.cik, c.ticker, c.name, c.exchange, c.foreign_filer,
+                  i.title, i.link, i.source, i.published, i.severity
            FROM stock_events e JOIN items i ON i.id = e.item_id JOIN companies c ON c.cik = e.cik
            ORDER BY i.published"""
     ).fetchall()
@@ -426,6 +468,7 @@ def incidents(conn):
                 break
         else:
             grouped.append({"cik": row["cik"], "ticker": row["ticker"],
+                            "otc": row["exchange"] == "OTC", "foreign": bool(row["foreign_filer"]),
                             "company": DISPLAY.get(row["ticker"]) or short_name(row["name"]),
                             "_first": published, "stories": [dict(row)]})
 
@@ -532,7 +575,9 @@ def main():
     print(f"\n{len(found)} incidents involving US-listed companies:\n")
     for g in found:
         s = g["stories"][0]
-        print(f"{g['date']}  {g['company']} ({g['ticker']})  [{s['source']}] {s['title']}")
+        notes = [n for n, on in (("over the counter", g["otc"]), ("foreign filer", g["foreign"])) if on]
+        print(f"{g['date']}  {g['company']} ({g['ticker']}{', ' + ', '.join(notes) if notes else ''})  "
+              f"[{s['source']}] {s['title']}")
         if g["change"] is not None:
             print(f"    {g['change']:+.1%} through {g['through']}, S&P 500 {g['market_change']:+.1%}")
         else:

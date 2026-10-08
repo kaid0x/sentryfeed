@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS cve_cache (
 CREATE TABLE IF NOT EXISTS companies (
     cik         INTEGER PRIMARY KEY,   -- the SEC's company ID
     ticker      TEXT NOT NULL,
-    name        TEXT NOT NULL
+    name        TEXT NOT NULL,
+    exchange    TEXT,                  -- Nasdaq, NYSE, OTC, CBOE
+    foreign_filer INTEGER NOT NULL DEFAULT 0   -- files as a foreign company (20-F/6-K), so no Item 1.05
 );
 CREATE INDEX IF NOT EXISTS idx_companies_ticker ON companies(ticker);
 CREATE TABLE IF NOT EXISTS stock_events (   -- a story naming a company as a breach victim
@@ -67,18 +69,25 @@ CREATE TABLE IF NOT EXISTS lookups (
 """
 
 
-# Columns added after Stage 2. Older databases get them added on connect.
+# Columns added after a table was first created. Older databases get them on connect.
 ADDED_COLUMNS = {
-    "kev": "INTEGER NOT NULL DEFAULT 0",
-    "severity_reason": "TEXT",
+    "items": {
+        "kev": "INTEGER NOT NULL DEFAULT 0",
+        "severity_reason": "TEXT",
+    },
+    "companies": {
+        "exchange": "TEXT",
+        "foreign_filer": "INTEGER NOT NULL DEFAULT 0",
+    },
 }
 
 
 def _migrate(conn):
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(items)")}
-    for name, definition in ADDED_COLUMNS.items():
-        if name not in cols:
-            conn.execute(f"ALTER TABLE items ADD COLUMN {name} {definition}")
+    for table, columns in ADDED_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
     conn.commit()
 
 

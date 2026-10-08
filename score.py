@@ -18,10 +18,20 @@ EVENT_TERMS = [
     r"^friday squid blogging\b",
 ]
 
+# Roundups of a week's news ("⚡ Weekly Recap", "ThreatsDay", "The Week in
+# Ransomware") mention every scary story of the week, so their keywords and CVEs
+# say nothing about one incident. They stay yellow.
+ROUNDUP_RE = re.compile(
+    r"weekly recap|week in review|week in ransomware|this week in (?:security|cyber)|"
+    r"^threatsday\b|^⚡|\bround-?up\b|weekly digest|news digest|in other news",
+    re.IGNORECASE,
+)
+
 # Signs of real-world exploitation: these can push anything to red.
 RED_TERMS = [
     r"actively exploit(?:ed|ing)",
     r"exploit(?:ed|ation) in the wild",
+    r"exploits? (?:for [\w-]+ )?exists? in the wild",   # Google's wording for Chrome zero-days
     r"under active exploitation",
     r"mass exploitation",
     r"zero[- ]days?",
@@ -102,14 +112,34 @@ def classify(item):
     Keywords only decide on their own when there is no score, except that
     exploitation language can still lift a scored item to red, because a
     medium-scored bug that's being exploited matters more than its score."""
+    title = item["title"]
     if item["category"] == "tech-ai":
         return "green", "tech / AI news"
 
-    if EVENT_RE.search(item["title"]):
-        if item["title"].lower().startswith("friday squid blogging"):
+    if EVENT_RE.search(title):
+        if title.lower().startswith("friday squid blogging"):
             return "blue", "Schneier's weekly open thread"
         return "blue", "event, webinar or guide"
 
+    if ROUNDUP_RE.search(title):
+        return "yellow", "weekly roundup of several stories"
+
+    colour, reason = _signals(item)
+    if colour == "red" and not item["kev"]:
+        source = item["source"] if "source" in item.keys() else ""
+        # Microsoft re-lists every Chrome fix for Edge, a dozen at a time, each
+        # scored 8.8-9.6. Without signs of exploitation they're routine patches.
+        exploited = _match(RED_RE, f"{title} {item['summary'] or ''}")
+        if source == "Microsoft MSRC" and title.startswith("Chromium") and not exploited:
+            return "orange", f"{reason}, a Chromium fix Microsoft re-lists for Edge (capped at Medium)"
+        # Pwn2Own "zero-days" are bugs found in a contest and handed straight to the vendors.
+        if "pwn2own" in title.lower():
+            return "orange", f"{reason}, but found at a hacking contest and reported to vendors (capped at Medium)"
+    return colour, reason
+
+
+def _signals(item):
+    """Colour from CISA's list, the CVSS score and keywords."""
     if item["kev"]:
         return "red", "CISA: actively exploited"
 
@@ -139,7 +169,7 @@ def score_all(conn):
     that arrives later, or a tweak to the keyword lists, applies to old items too."""
     counts = Counter()
     rows = conn.execute(
-        "SELECT id, category, title, summary, cvss, kev FROM items"
+        "SELECT id, category, source, title, summary, cvss, kev FROM items"
     ).fetchall()
     for row in rows:
         colour, reason = classify(row)

@@ -23,6 +23,7 @@
   .card-head h2 { font-size: 18px; margin: 0; font-weight: 600; }
   .ticker { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
   .date { font: 12px var(--mono); color: var(--muted); margin-left: auto; }
+  .otc { font: 11.5px var(--mono); color: var(--muted); cursor: help; border-bottom: 1px dotted var(--muted); }
   .story { margin: 0 0 14px; font-size: 14px; }
   .story a { text-decoration: none; border-left: 3px solid var(--sev); padding-left: 9px; display: block; }
   .story a:hover .story-title { text-decoration: underline; }
@@ -152,6 +153,7 @@
             <div class="card-head">
               <h2 id="co-{{ loop.index }}">{{ inc.company }}</h2>
               <span class="ticker">{{ inc.ticker }}</span>
+              {% if inc.otc %}<span class="otc" title="Traded over the counter, outside the main exchanges: often a foreign company's US shares, with less trading">over the counter</span>{% endif %}
               <span class="date">story {{ inc.date }}</span>
             </div>
             <p class="story sev-{{ lead.severity }}">
@@ -209,6 +211,8 @@
                   {% if not loop.first %} · {% endif %}<a href="{{ f.url }}" target="_blank" rel="noopener noreferrer">{{ f.form }} Item 1.05 filed {{ f.filed }} ↗</a>
                 {% endfor %}
                 <span class="muted">(material cybersecurity incident)</span>
+              {% elif inc.foreign %}
+                <span class="muted">Files with the SEC as a foreign company, so the Item 1.05 breach rule doesn't apply. Its breach news would come in a 6-K or at home.</span>
               {% elif inc.sec_checked %}
                 <span class="muted">No Item 1.05 breach filing within 30 days before or 60 days after the story.</span>
               {% else %}
