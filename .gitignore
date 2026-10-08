@@ -4,3 +4,5 @@ sentryfeed.db
 
 venv/
 __pycache__/
+
+tools/node_modules/

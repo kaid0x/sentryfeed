@@ -24,6 +24,7 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
                └─ score.py    assign a colour and record why
 
 app.py ──> dedupe.py   group the same story from different outlets
+       └─> geo.py      find the countries each story is about, for the map
 ```
 
 - **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review. The list lives in `feeds.py`.
@@ -62,6 +63,20 @@ Signals are trusted in this order:
 **Negation.** A keyword doesn't count when it's being denied: "not a zero-day", "hasn't been exploited in the wild" and "no evidence it has been exploited in the wild" don't turn red. Only short filler words may sit between the negation and the keyword, so "Microsoft has not patched a zero-day" still does.
 
 Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploited`, `mentions 'zero-day'`), and the dashboard shows it. Everything is rescored on every run, so a score that arrives later or a keyword change applies to old items too.
+
+## Map
+
+`/map` shows where incidents happened and who the reporting blames, for the same time windows as the feed.
+
+- **Where it happened:** the country is filled in the colour of its most serious story, brighter the more stories it has.
+- **Blamed:** a purple dashed outline. A country counts as blamed when it's attached to attacker wording ("Chinese hackers", "Russia-linked group", "backed by Iran") or when a story names a group publicly tied to it (Lazarus → North Korea, Volt Typhoon → China, APT28 → Russia; any Microsoft "Typhoon", "Blizzard", "Sandstorm" or "Sleet" group). Every other country mentioned counts as where it happened.
+- **Blamed → targeted:** when one story has both, a curved line joins them.
+
+Clicking a country lists its stories, split into "Happened here" and "Blamed here", and each story in the feed shows its countries with a link to the map.
+
+`geo.py` reads only the title and the first two sentences of the summary, because later sentences tend to mention countries in passing (where a researcher is based, older incidents). Matching is case-sensitive, so "US" isn't "us" and "Polish" isn't "polish". Tech news and events aren't mapped, and the page says how many stories named no country. Run `python geo.py` to print what it finds in your database.
+
+The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (public domain). `tools/build_world.mjs` turns it into a static SVG once, offline, so the Pi serves a 120 KB file and loads nothing from other sites. Countries too small for the light 1:110m outlines, like Singapore and Bahrain, appear as dots when a story mentions them.
 
 ## Merging duplicate stories
 
@@ -109,9 +124,10 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Keyword matching only understands simple negation; sarcasm or "could become a zero-day" still matches.
 - Story merging compares titles only, so two very differently worded headlines about the same story stay separate.
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
+- The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
+- "Blamed" is what the reporting says. Attribution is often disputed or later revised.
 
 ## Planned
 
-- A world map that places incidents geographically.
 - Share-price impact for public companies named in a breach.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.

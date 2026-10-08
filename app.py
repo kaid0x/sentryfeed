@@ -9,6 +9,7 @@ from flask import Flask, Response, g, jsonify, render_template, request
 
 from db import DB_PATH, connect
 from dedupe import group_stories
+from geo import NAMES as COUNTRY_NAMES, locate
 
 app = Flask(__name__)
 
@@ -83,12 +84,19 @@ ALSO_FIELDS = ("source", "title", "link", "age", "match")
 def load_items(days):
     """One entry per story. When several outlets covered it, the highest-ranked
     article leads (so the story takes its colour), and the rest are listed under
-    "also" with their CVEs added to the lead's."""
+    "also" with their CVEs and countries added to the lead's."""
     stories = group_stories(load_items_ungrouped(days), RANK)
     for story in stories:
         others = story["also"]
+        members = [story, *others]
         story["cves"] = sorted(set(story["cves"]).union(*(m["cves"] for m in others)))
-        story["kev"] = int(any(m["kev"] for m in [story, *others]))
+        story["kev"] = int(any(m["kev"] for m in members))
+        where, blamed = set(), set()
+        for m in members:
+            w, b = locate(m)
+            where.update(w)
+            blamed.update(b)
+        story["where"], story["blamed"] = sorted(where), sorted(blamed)
         story["also"] = [{k: m.get(k) for k in ALSO_FIELDS} for m in others]
     return stories
 
@@ -144,7 +152,30 @@ def index():
         items=items,
         counts=counts,
         tiles=[(k, label) for k, label in SEVERITIES if counts[k] or k not in OPTIONAL_TILES],
+        country_names=COUNTRY_NAMES,
         kev_count=sum(1 for i in items if i["kev"]),
+        severities=SEVERITIES,
+        windows=WINDOWS,
+        days=days,
+        updated=last_updated(),
+    )
+
+
+# Stories on the map: incidents only, not tech news or events.
+MAP_SEVERITIES = ("red", "orange", "yellow")
+MAP_FIELDS = ("title", "link", "source", "age", "severity", "where", "blamed")
+
+
+@app.route("/map")
+def world_map():
+    days = window_days()
+    stories = [s for s in load_items(days) if s["severity"] in MAP_SEVERITIES]
+    placed = [s for s in stories if s["where"] or s["blamed"]]
+    return render_template(
+        "map.html",
+        stories=[{**{k: s[k] for k in MAP_FIELDS}, "sources": 1 + len(s["also"])} for s in placed],
+        unplaced=len(stories) - len(placed),
+        country_names=COUNTRY_NAMES,
         severities=SEVERITIES,
         windows=WINDOWS,
         days=days,

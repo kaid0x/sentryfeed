@@ -1,0 +1,325 @@
+{% extends "base.html" %}
+{% set active = "map" %}
+
+{% block title %}Map · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .updated { font: 12px var(--mono); color: var(--muted); }
+  .windows { margin-left: auto; display: flex; gap: 4px; }
+  .windows a {
+    font: 12px var(--mono); color: var(--muted); text-decoration: none;
+    padding: 4px 9px; border: 1px solid transparent; border-radius: 4px;
+  }
+  .windows a:hover { color: var(--text); }
+  .windows a[aria-current="page"] { color: var(--text); border-color: var(--line); background: var(--panel); }
+
+  main {
+    flex: 1; min-height: 0;
+    display: grid; grid-template-columns: 1fr minmax(300px, 380px);
+  }
+  .map-wrap { overflow: auto; padding: 18px 20px 24px; display: flex; flex-direction: column; gap: 12px; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+    font: 12px var(--mono); color: var(--muted); margin: 0; padding: 0; list-style: none;
+  }
+  .legend li { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 14px; height: 10px; border-radius: 2px; background: var(--sev); display: inline-block; }
+  .swatch.blamed { background: none; border: 1.5px dashed var(--purple); }
+  .swatch.link { height: 0; border-top: 1.5px solid var(--purple); border-radius: 0; background: none; width: 18px; }
+
+  #world { width: 100%; height: auto; display: block; }
+  .country { fill: #1b2028; stroke: var(--bg); stroke-width: 0.5; transition: fill-opacity 0.15s; }
+  .country.dot { display: none; stroke-width: 0; }
+  .country.hit, .country.blamed { cursor: pointer; }
+  .country.hit { fill: var(--sev); }
+  .country.hit.n1 { fill-opacity: 0.6; }
+  .country.hit.n2 { fill-opacity: 0.8; }
+  .country.hit.n3 { fill-opacity: 1; }
+  .country.blamed { stroke: var(--purple); stroke-width: 1.4; stroke-dasharray: 3 2; }
+  .country.blamed:not(.hit) { fill: var(--purple); fill-opacity: 0.18; }
+  .country.dot.hit, .country.dot.blamed { display: inline; }
+  .country.dot.blamed { stroke-dasharray: none; stroke-width: 1.2; }
+  .country.hit:hover, .country.blamed:hover { stroke: var(--text); stroke-width: 1.2; }
+  .country.active { stroke: var(--text); stroke-width: 1.8; stroke-dasharray: none; }
+  .country:focus { outline: none; }
+  .country:focus-visible { stroke: var(--text); stroke-width: 2; stroke-dasharray: none; }
+  .link { fill: none; stroke: var(--purple); stroke-width: 1; stroke-opacity: 0.55; pointer-events: none; }
+  .link-end { fill: var(--purple); fill-opacity: 0.8; pointer-events: none; }
+  #links.dim .link, #links.dim .link-end { stroke-opacity: 0.12; fill-opacity: 0.15; }
+  #links.dim .on { stroke-opacity: 0.95; fill-opacity: 1; stroke-width: 1.5; }
+
+  .note { font-size: 13px; color: var(--muted); margin: 0; }
+
+  .panel { border-left: 1px solid var(--line); overflow-y: auto; padding: 20px 20px 32px; }
+  .panel h2 { font-size: 19px; margin: 0 0 4px; font-weight: 600; }
+  .panel .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  .panel h3 {
+    font: 12px var(--mono); color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.05em; margin: 22px 0 10px; font-weight: 400;
+  }
+  .panel ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .story a { text-decoration: none; display: block; border-left: 3px solid var(--sev); padding: 2px 0 2px 10px; }
+  .story a:hover .story-title { text-decoration: underline; }
+  .story-title { font-size: 14px; line-height: 1.4; display: block; }
+  .story-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; font: 11.5px var(--mono); color: var(--muted); margin-top: 4px; }
+  .story-meta .sev-tag { color: var(--sev); text-transform: uppercase; letter-spacing: 0.05em; }
+  .story-meta .other { color: var(--purple); }
+  .back {
+    background: none; border: 0; padding: 0; margin: 0 0 14px; cursor: pointer;
+    font: 12px var(--mono); color: var(--muted);
+  }
+  .back:hover { color: var(--text); }
+  .top button {
+    display: flex; width: 100%; justify-content: space-between; align-items: baseline; gap: 12px;
+    background: none; border: 0; border-bottom: 1px solid var(--line); padding: 8px 0; cursor: pointer; text-align: left;
+  }
+  .top button:hover .top-name { text-decoration: underline; }
+  .top-counts { font: 12px var(--mono); color: var(--muted); white-space: nowrap; }
+  .top-counts .b { color: var(--purple); }
+  .top ul { gap: 0; }
+  .empty { color: var(--muted); }
+  .empty code { font-family: var(--mono); color: var(--text); }
+
+  @media (max-width: 860px) {
+    main { display: flex; flex-direction: column; }
+    .map-wrap { padding: 14px 12px 16px; overflow: visible; }
+    .panel { border-left: 0; border-top: 1px solid var(--line); overflow: visible; padding: 18px 16px 28px; }
+    .windows { margin-left: 0; width: 100%; }
+    .country.dot { r: 5px; }
+  }
+</style>
+{% endblock %}
+
+{% block header_extra %}
+  <span class="updated">{% if updated %}updated {{ updated }}{% else %}no data yet{% endif %}</span>
+  <nav class="windows" aria-label="Time window">
+    {% for d, label in windows %}
+      <a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+{% endblock %}
+
+{% block body %}
+<h1 class="sr-only">Map of stories by country</h1>
+<main>
+  <section class="map-wrap" aria-label="Map">
+    <ul class="legend">
+      <li class="sev-red"><span class="swatch"></span>Major</li>
+      <li class="sev-orange"><span class="swatch"></span>Medium</li>
+      <li class="sev-yellow"><span class="swatch"></span>Low</li>
+      <li><span class="swatch blamed"></span>Blamed</li>
+      <li><span class="swatch link"></span>Blamed → targeted</li>
+    </ul>
+    {% include "_world.svg" %}
+    <p class="note">
+      Coloured countries are where incidents happened, using the colour of their most serious story; brighter means more stories.
+      Blamed means the reporting attributes the attack to that country, which isn't proof.
+      {% if unplaced %}{{ unplaced }} {{ "story" if unplaced == 1 else "stories" }} in this window didn't name a country.{% endif %}
+    </p>
+  </section>
+
+  <aside class="panel" id="panel" aria-live="polite"></aside>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const STORIES = {{ stories | tojson }};
+  const LABELS = {{ dict(severities) | tojson }};
+  const RANK = { red: 0, orange: 1, yellow: 2 };
+  const WORLD = {% include "_world_points.json" %};
+  const NAMES = Object.assign({}, WORLD.names, {{ country_names | tojson }});
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const $ = (id) => document.getElementById(id);
+  const name = (cc) => NAMES[cc] || cc;
+  const panel = $("panel");
+
+  // Per country: stories that happened there and stories that blame it.
+  const byCountry = {};
+  const entry = (cc) => (byCountry[cc] ||= { where: [], blamed: [] });
+  STORIES.forEach((s, i) => {
+    s.i = i;
+    s.where.forEach((cc) => entry(cc).where.push(s));
+    s.blamed.forEach((cc) => entry(cc).blamed.push(s));
+  });
+
+  const shapes = {};
+  document.querySelectorAll("#countries .country").forEach((el) => { shapes[el.dataset.cc] = el; });
+  const group = $("countries");
+
+  for (const [cc, e] of Object.entries(byCountry)) {
+    const el = shapes[cc];
+    if (!el) continue;
+    if (e.where.length) {
+      const worst = e.where.reduce((a, s) => (RANK[s.severity] < RANK[a] ? s.severity : a), "yellow");
+      const n = e.where.length;
+      el.classList.add("hit", "sev-" + worst, n >= 4 ? "n3" : n >= 2 ? "n2" : "n1");
+    }
+    if (e.blamed.length) el.classList.add("blamed");
+    const parts = [];
+    if (e.where.length) parts.push(e.where.length + " happened here");
+    if (e.blamed.length) parts.push(e.blamed.length + " blamed");
+    const title = document.createElementNS(SVG_NS, "title");
+    title.textContent = name(cc) + ": " + parts.join(", ");
+    el.append(title);
+    el.setAttribute("tabindex", "0");
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", title.textContent);
+  }
+  // Outlines are drawn in document order, so move outlined countries to the end
+  // where neighbours can't paint over their dashed borders, and dots on top of all.
+  group.querySelectorAll(".blamed:not(.dot)").forEach((el) => group.append(el));
+  group.querySelectorAll(".dot.hit, .dot.blamed").forEach((el) => group.append(el));
+
+  // A curved line from each blamed country to each country it's said to have targeted.
+  const links = $("links");
+  const pairs = new Map();
+  for (const s of STORIES) {
+    for (const from of s.blamed) {
+      for (const to of s.where) {
+        if (from === to || !WORLD.points[from] || !WORLD.points[to]) continue;
+        const key = from + ">" + to;
+        if (!pairs.has(key)) pairs.set(key, { from, to, stories: [] });
+        pairs.get(key).stories.push(s.i);
+      }
+    }
+  }
+  for (const { from, to } of pairs.values()) {
+    const [x1, y1] = WORLD.points[from], [x2, y2] = WORLD.points[to];
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const dx = x2 - x1, dy = y2 - y1;
+    const lift = Math.min(0.3 * Math.hypot(dx, dy), 90);
+    // Bend the line upwards (towards the top of the map) whichever way it runs.
+    let nx = -dy, ny = dx;
+    const len = Math.hypot(nx, ny) || 1;
+    if (ny > 0) { nx = -nx; ny = -ny; }
+    const cx = mx + (nx / len) * lift, cy = my + (ny / len) * lift;
+    const line = document.createElementNS(SVG_NS, "path");
+    line.setAttribute("class", "link");
+    line.setAttribute("d", `M${x1},${y1} Q${cx.toFixed(1)},${cy.toFixed(1)} ${x2},${y2}`);
+    line.dataset.from = from;
+    line.dataset.to = to;
+    const end = document.createElementNS(SVG_NS, "circle");
+    end.setAttribute("class", "link-end");
+    end.setAttribute("cx", x2);
+    end.setAttribute("cy", y2);
+    end.setAttribute("r", "2.2");
+    end.dataset.from = from;
+    end.dataset.to = to;
+    links.append(line, end);
+  }
+
+  // ---- Side panel (everything from feeds goes in via textContent) ----
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function storyItem(s, cc, role) {
+    const li = el("li", "story sev-" + s.severity);
+    const box = s.link ? el("a") : el("div");
+    if (s.link) { box.href = s.link; box.target = "_blank"; box.rel = "noopener noreferrer"; }
+    box.append(el("span", "story-title", s.title + (s.link ? " ↗" : "")));
+    const meta = el("span", "story-meta");
+    meta.append(el("span", "sev-tag", LABELS[s.severity]), el("span", "", s.source));
+    if (s.age) meta.append(el("span", "", s.age));
+    if (s.sources > 1) meta.append(el("span", "", "+" + (s.sources - 1) + (s.sources > 2 ? " sources" : " source")));
+    // The other side of the story: who's blamed for an attack here, or who was targeted.
+    const other = (role === "where" ? s.blamed : s.where).filter((c) => c !== cc);
+    if (other.length) meta.append(el("span", "other", (role === "where" ? "blamed: " : "targeted: ") + other.map(name).join(", ")));
+    box.append(meta);
+    li.append(box);
+    return li;
+  }
+
+  function section(title, stories, cc, role) {
+    if (!stories.length) return [];
+    const ul = el("ul");
+    stories
+      .slice()
+      .sort((a, b) => RANK[a.severity] - RANK[b.severity])
+      .forEach((s) => ul.append(storyItem(s, cc, role)));
+    return [el("h3", "", title + " · " + stories.length), ul];
+  }
+
+  function highlight(cc) {
+    document.querySelectorAll(".country.active").forEach((n) => n.classList.remove("active"));
+    links.classList.toggle("dim", Boolean(cc));
+    links.querySelectorAll(".on").forEach((n) => n.classList.remove("on"));
+    if (!cc) return;
+    shapes[cc]?.classList.add("active");
+    links.querySelectorAll(`[data-from="${cc}"], [data-to="${cc}"]`).forEach((n) => n.classList.add("on"));
+  }
+
+  function showCountry(cc) {
+    const e = byCountry[cc];
+    if (!e) return;
+    highlight(cc);
+    const back = el("button", "back", "← All countries");
+    back.addEventListener("click", showOverview);
+    const counts = [];
+    if (e.where.length) counts.push(e.where.length + (e.where.length === 1 ? " story happened here" : " stories happened here"));
+    if (e.blamed.length) counts.push("blamed in " + e.blamed.length);
+    panel.replaceChildren(
+      back,
+      el("h2", "", name(cc)),
+      el("p", "sub", counts.join(" · ")),
+      ...section("Happened here", e.where, cc, "where"),
+      ...section("Blamed here", e.blamed, cc, "blamed"),
+    );
+    if (window.matchMedia("(max-width: 860px)").matches) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function showOverview() {
+    highlight(null);
+    const ranked = Object.entries(byCountry)
+      .sort(([, a], [, b]) => (b.where.length + b.blamed.length) - (a.where.length + a.blamed.length));
+    if (!ranked.length) {
+      const p = el("p", "empty");
+      p.append("No stories in this time window name a country yet. Try a longer window, or run ", el("code", "", "python collect.py"), " on the Pi.");
+      panel.replaceChildren(el("h2", "", "Countries in the news"), p);
+      return;
+    }
+    const ul = el("ul");
+    for (const [cc, e] of ranked) {
+      const btn = el("button");
+      btn.append(el("span", "top-name", name(cc)));
+      const counts = el("span", "top-counts");
+      if (e.where.length) counts.append(e.where.length + " here");
+      if (e.where.length && e.blamed.length) counts.append(" · ");
+      if (e.blamed.length) counts.append(el("span", "b", e.blamed.length + " blamed"));
+      btn.append(counts);
+      btn.addEventListener("click", () => showCountry(cc));
+      const li = el("li");
+      li.append(btn);
+      ul.append(li);
+    }
+    const wrap = el("div", "top");
+    wrap.append(ul);
+    panel.replaceChildren(
+      el("h2", "", "Countries in the news"),
+      el("p", "sub", STORIES.length + (STORIES.length === 1 ? " story names" : " stories name") + " a country. Pick one on the map or below."),
+      wrap,
+    );
+  }
+
+  group.addEventListener("click", (e) => {
+    const target = e.target.closest(".country");
+    if (target && byCountry[target.dataset.cc]) showCountry(target.dataset.cc);
+  });
+  group.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const target = e.target.closest(".country");
+    if (target && byCountry[target.dataset.cc]) { e.preventDefault(); showCountry(target.dataset.cc); }
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") showOverview(); });
+
+  showOverview();
+})();
+</script>
+{% endblock %}
