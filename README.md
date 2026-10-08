@@ -2,6 +2,8 @@
 
 A self-hosted threat-intel dashboard running on a Raspberry Pi 3B. Every 30 minutes it pulls security and tech news, looks up the CVEs each story mentions, checks whether CISA has confirmed they're being exploited, and colours every story by how much it matters.
 
+![SentryFeed dashboard: severity tiles, the story list and a story's detail panel](docs/dashboard.png)
+
 | Colour | Meaning |
 |---|---|
 | Red | Confirmed exploitation, a zero-day, or CVSS 9.0+ |
