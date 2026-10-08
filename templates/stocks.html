@@ -74,11 +74,47 @@
   th { color: var(--muted); font-weight: 400; }
   tr.story-row td { color: var(--purple); }
 
+  .section { margin: 0 0 40px; }
+  .section-title { font-size: 19px; margin: 0 0 6px; font-weight: 600; }
+  .section .lede { margin-bottom: 18px; }
+  .jump { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 12.5px var(--mono); margin: 0 0 28px; }
+  .jump a { color: var(--muted); }
+  .jump a:hover { color: var(--text); }
+
+  .summary-wrap { overflow-x: auto; margin: 0 0 18px; }
+  table.summary { font-size: 13px; margin: 0; min-width: 560px; }
+  table.summary td, table.summary th { padding: 7px 8px; }
+  table.summary td:not(:first-child) { white-space: nowrap; }
+  table.summary td:first-child { font-family: var(--sans); color: var(--text); }
+  table.summary .sector td { border-top: 2px solid var(--line); color: var(--muted); }
+  table.summary .sector td:first-child { color: var(--muted); }
+  .n-stories { color: var(--text); }
+
+  .watch-legend { margin: 0 0 12px; }
+  .watch-legend .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--sev); display: inline-block; }
+  .minis { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 12px; align-items: start; }
+  .mini { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 12px 10px; min-width: 0; }
+  .mini-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; }
+  .mini-head h3 { font-size: 15px; margin: 0; font-weight: 600; }
+  .mini-head .move { margin-left: auto; font: 600 15px var(--sans); font-variant-numeric: tabular-nums; }
+  .mini-vs { font: 11.5px var(--mono); color: var(--muted); margin: 0 0 2px; }
+  .mini .pending { margin: 4px 0; }
+  .mini-stories { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; font-size: 12.5px; }
+  .mini-stories a { text-decoration: none; display: block; border-left: 3px solid var(--sev); padding-left: 8px; }
+  .mini-stories a:hover span.t { text-decoration: underline; }
+  .mini-stories .d { display: block; font: 11px var(--mono); color: var(--muted); }
+  .mark { stroke: var(--panel); stroke-width: 2; fill: var(--sev); }
+  .tip .story-tip { max-width: 260px; white-space: normal; color: var(--text); margin-top: 4px; font-family: var(--sans); }
+
   .empty { color: var(--muted); }
   .credit { font-size: 13px; color: var(--muted); margin: 28px 0 0; max-width: 760px; }
 
   @media (max-width: 560px) {
     .page { padding: 22px 12px 36px; }
+    /* Phones: drop the ticker and S&P 500 columns rather than scroll sideways */
+    table.summary { min-width: 0; }
+    table.summary th:nth-child(2), table.summary td:nth-child(2),
+    table.summary th:nth-child(4), table.summary td:nth-child(4) { display: none; }
     .card { padding: 14px 12px 12px; }
     .change { font-size: 26px; }
     .date { margin-left: 0; width: 100%; }
@@ -94,7 +130,10 @@
 <main class="page">
   <div class="page-inner">
     <h1>Stock impact</h1>
-    <p class="lede">US-listed companies named as breach victims in the last {{ lookback }} days. Each chart starts at the last closing price before the story (0%) and compares the share price with the S&amp;P 500 over the same days. Prices move for many reasons, so this shows what happened around the story, not what caused it.</p>
+    <nav class="jump" aria-label="On this page">
+      <a href="#victims">Breach victims</a>
+      <a href="#watch">Security vendor watch</a>
+    </nav>
 
     {% if not has_sec_contact %}
       <p class="notice">This needs a contact for the SEC, which asks every automated visitor to identify themselves. On the Pi, put a name and email in <code>.sec_contact</code>, for example <code>SentryFeed yourname@example.com</code>. See the README.</p>
@@ -102,6 +141,9 @@
       <p class="notice">Breaches and SEC filings are tracked, but share prices need a free Alpha Vantage key in <code>.alphavantage_key</code> on the Pi. See the README.</p>
     {% endif %}
 
+    <section class="section" id="victims" aria-labelledby="victims-title">
+    <h2 class="section-title" id="victims-title">Breach victims</h2>
+    <p class="lede">US-listed companies named as breach victims in the last {{ lookback }} days. Each chart starts at the last closing price before the story (0%) and compares the share price with the S&amp;P 500 over the same days. Prices move for many reasons, so this shows what happened around the story, not what caused it.</p>
     {% if incidents %}
       <div class="cards">
         {% for inc in incidents %}
@@ -139,7 +181,7 @@
                 <li><span class="key"></span>{{ inc.ticker }}</li>
                 <li><span class="key market-key"></span>S&amp;P 500 (SPY)</li>
               </ul>
-              <div class="chart" data-index="{{ loop.index0 }}" tabindex="0" role="img"
+              <div class="chart" data-kind="incident" data-index="{{ loop.index0 }}" tabindex="0" role="img"
                    aria-label="{{ inc.company }} share price compared with the S&amp;P 500 around the story. Use the left and right arrow keys to read each day."></div>
               <details>
                 <summary>Daily prices</summary>
@@ -180,6 +222,80 @@
       <p class="empty">No US-listed company has been named as a breach victim in the last {{ lookback }} days{% if not has_sec_contact %}, or this isn't set up yet{% endif %}.</p>
     {% endif %}
 
+    </section>
+
+    <section class="section" id="watch" aria-labelledby="watch-title">
+      <h2 class="section-title" id="watch-title">Security vendor watch</h2>
+      <p class="lede">Big cybersecurity companies over the last {{ watch_days }} trading days, against the S&amp;P 500. Dots mark days SentryFeed had a Major or Medium story about a flaw or breach in the company's own products, so you can see whether its share price moved around them. All charts use the same scale.</p>
+
+      {% if not has_prices_key %}
+        <p class="pending">Needs an Alpha Vantage key in <code>.alphavantage_key</code> on the Pi.</p>
+      {% elif not watch.vendors %}
+        <p class="pending">Waiting for price data. The collector fetches these once a day, a few per run.</p>
+      {% else %}
+        <div class="summary-wrap">
+          <table class="summary">
+            <thead><tr><th scope="col">Company</th><th scope="col">Ticker</th><th scope="col">{{ watch_days }} days</th><th scope="col">S&amp;P 500</th><th scope="col">vs market</th><th scope="col">Product stories</th></tr></thead>
+            <tbody>
+              {% for v in watch.vendors + ([watch.sector] if watch.sector else []) %}
+                <tr{% if loop.last and watch.sector %} class="sector"{% endif %}>
+                  <td>{{ v.company }}</td>
+                  <td>{{ v.ticker }}</td>
+                  {% if v.change is not none %}
+                    <td>{{ "%+.1f" | format(v.change * 100) }}%</td>
+                    <td>{{ "%+.1f" | format(v.market_change * 100) }}%</td>
+                    <td>{{ ("%+.1f" | format((v.change - v.market_change) * 100)) | replace("-0.0", "+0.0") }} pts</td>
+                  {% else %}
+                    <td>waiting</td><td>–</td><td>–</td>
+                  {% endif %}
+                  <td>{% if v.stories is defined %}<span class="n-stories">{{ v.stories | length }}</span>{% else %}–{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <ul class="legend watch-legend" aria-hidden="true">
+          <li><span class="key"></span>Company</li>
+          <li><span class="key market-key"></span>S&amp;P 500 (SPY)</li>
+          <li class="sev-red"><span class="dot"></span>Major story</li>
+          <li class="sev-orange"><span class="dot"></span>Medium story</li>
+        </ul>
+        <div class="minis">
+          {% for v in watch.vendors %}
+            <article class="mini" aria-labelledby="v-{{ v.ticker }}">
+              <div class="mini-head">
+                <h3 id="v-{{ v.ticker }}">{{ v.company }}</h3>
+                <span class="ticker">{{ v.ticker }}</span>
+                {% if v.change is not none %}
+                  <span class="move">{{ "%+.1f" | format(v.change * 100) }}%</span>
+                {% endif %}
+              </div>
+              {% if v.change is not none %}
+                <p class="mini-vs">S&amp;P 500 {{ "%+.1f" | format(v.market_change * 100) }}% · {{ v.from }} to {{ v.through }}</p>
+                <div class="chart" data-kind="vendor" data-index="{{ loop.index0 }}" tabindex="0" role="img"
+                     aria-label="{{ v.company }} share price against the S&amp;P 500 over the last {{ watch_days }} trading days, with {{ v.stories | length }} product {{ 'story' if v.stories | length == 1 else 'stories' }} marked. Use the left and right arrow keys to read each day."></div>
+              {% else %}
+                <p class="pending">Waiting for price data.</p>
+              {% endif %}
+              {% if v.stories %}
+                <ul class="mini-stories">
+                  {% for st in v.stories | reverse %}
+                    <li class="sev-{{ st.severity }}">
+                      <a {% if st.link %}href="{{ st.link }}" target="_blank" rel="noopener noreferrer"{% endif %}>
+                        <span class="d">{{ st.day }} · {{ st.source }}</span>
+                        <span class="t">{{ st.title }}</span>
+                      </a>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </section>
+
     <p class="credit">Companies and breach filings from the <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener noreferrer">SEC's EDGAR</a>; daily closing prices from <a href="https://www.alphavantage.co" target="_blank" rel="noopener noreferrer">Alpha Vantage</a>. Since December 2023, US-listed companies must file an 8-K under Item 1.05 within four business days of deciding a cyber incident is material. Not financial advice.</p>
   </div>
 </main>
@@ -189,8 +305,11 @@
 <script nonce="{{ csp_nonce }}">
 (function () {
   const INCIDENTS = {{ incidents | tojson }};
+  const WATCH = {{ watch | tojson }};
   const SVG_NS = "http://www.w3.org/2000/svg";
-  const H = 150, PAD = { l: 40, r: 10, t: 16, b: 20 };
+  const RANK = { red: 0, orange: 1 };
+  const LABEL = { red: "Major", orange: "Medium" };
+  const PAD = { l: 40, r: 10, t: 16, b: 20 };
   const pct = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
 
   function node(tag, attrs, parent) {
@@ -206,15 +325,20 @@
     return [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || raw;
   }
 
-  function draw(box, inc) {
-    // Draw at the box's real width so labels stay 10px on a phone instead of shrinking.
+  // One chart: the share price and the S&P 500 as % change from points[baseIndex].
+  //   cfg.ticker       label for the readout
+  //   cfg.storyMarker  draw the "story" line just after baseIndex (breach victims)
+  //   cfg.marks        [{day, severity, title}] dots on the price line (vendor watch)
+  //   cfg.range        [lo, hi] shared across charts so they compare fairly
+  function draw(box, cfg) {
     const W = Math.max(280, Math.round(box.clientWidth));
-    const pts = inc.points;
-    const baseIndex = Math.max(0, pts.findIndex((p) => p.day === inc.base_day));
-    const base = pts[baseIndex];
+    const H = cfg.height || 150;
+    const pts = cfg.points;
+    const base = pts[cfg.baseIndex];
     const rows = pts.map((p) => ({ day: p.day, close: p.close, s: p.close / base.close - 1, m: p.market / base.market - 1 }));
-    let lo = Math.min(0, ...rows.map((r) => Math.min(r.s, r.m)));
-    let hi = Math.max(0, ...rows.map((r) => Math.max(r.s, r.m)));
+    let lo = cfg.range ? cfg.range[0] : Math.min(0, ...rows.map((r) => Math.min(r.s, r.m)));
+    let hi = cfg.range ? cfg.range[1] : Math.max(0, ...rows.map((r) => Math.max(r.s, r.m)));
+    lo = Math.min(lo, 0); hi = Math.max(hi, 0);
     if (hi - lo < 0.02) { hi += 0.01; lo -= 0.01; }
     const step = niceStep(hi - lo);
     lo = Math.floor(lo / step) * step;
@@ -228,9 +352,9 @@
       node("line", { class: Math.abs(v) < step / 100 ? "zero-line" : "grid-line", x1: PAD.l, x2: W - PAD.r, y1: yy, y2: yy }, svg);
       node("text", { class: "axis-label", x: PAD.l - 6, y: Number(yy) + 3, "text-anchor": "end" }, svg).textContent = pct(Math.round(v * 1000) / 1000);
     }
-    // The story landed after this close: draw the marker halfway to the next day.
-    if (baseIndex < rows.length - 1) {
-      const sx = ((x(baseIndex) + x(baseIndex + 1)) / 2).toFixed(1);
+    if (cfg.storyMarker && cfg.baseIndex < rows.length - 1) {
+      // The story landed after this close: draw the marker halfway to the next day.
+      const sx = ((x(cfg.baseIndex) + x(cfg.baseIndex + 1)) / 2).toFixed(1);
       node("line", { class: "story-line", x1: sx, x2: sx, y1: PAD.t - 4, y2: H - PAD.b }, svg);
       node("text", { class: "story-label", x: Number(sx) + 4, y: PAD.t - 6 }, svg).textContent = "story";
     }
@@ -240,6 +364,16 @@
     const path = (key) => rows.map((r, i) => (i ? "L" : "M") + x(i).toFixed(1) + "," + y(r[key]).toFixed(1)).join(" ");
     node("path", { class: "line-market", d: path("m") }, svg);
     node("path", { class: "line-stock", d: path("s") }, svg);
+
+    // Story dots: one per trading day, in the colour of that day's most serious story.
+    const marksByDay = {};
+    for (const m of cfg.marks || []) (marksByDay[m.day] ||= []).push(m);
+    rows.forEach((r, i) => {
+      const day = marksByDay[r.day];
+      if (!day) return;
+      const worst = day.reduce((a, m) => (RANK[m.severity] < RANK[a] ? m.severity : a), "orange");
+      node("circle", { class: "mark sev-" + worst, cx: x(i), cy: y(r.s), r: 4.5 }, svg);
+    });
 
     // Hover and keyboard readout: a crosshair that snaps to the nearest trading day.
     const cross = node("line", { class: "cross", y1: PAD.t, y2: H - PAD.b, visibility: "hidden" }, svg);
@@ -272,12 +406,19 @@
       ds.setAttribute("cx", x(i)); ds.setAttribute("cy", y(r.s));
       dm.setAttribute("cx", x(i)); dm.setAttribute("cy", y(r.m));
       const head = document.createElement("div");
-      head.textContent = r.day + (i === baseIndex ? " · last close before story" : "");
-      tip.replaceChildren(
+      head.textContent = r.day + (cfg.storyMarker && i === cfg.baseIndex ? " · last close before story" : "");
+      const parts = [
         head,
-        line(pct(r.s), inc.ticker + " ($" + r.close.toFixed(2) + ")", "key"),
+        line(pct(r.s), cfg.ticker + " ($" + r.close.toFixed(2) + ")", "key"),
         line(pct(r.m), "S&P 500", "key market-key"),
-      );
+      ];
+      for (const m of marksByDay[r.day] || []) {
+        const t = document.createElement("div");
+        t.className = "story-tip";
+        t.textContent = LABEL[m.severity] + ": " + (m.title.length > 90 ? m.title.slice(0, 87) + "…" : m.title);
+        parts.push(t);
+      }
+      tip.replaceChildren(...parts);
       tip.hidden = false;
       // Sit beside the crosshair, inside the chart, flipping sides near the right edge.
       const left = x(i) * (box.clientWidth / W);
@@ -307,7 +448,17 @@
     });
   }
 
-  document.querySelectorAll(".chart").forEach((box) => draw(box, INCIDENTS[Number(box.dataset.index)]));
+  document.querySelectorAll(".chart").forEach((box) => {
+    const i = Number(box.dataset.index);
+    if (box.dataset.kind === "vendor") {
+      const v = WATCH.vendors[i];
+      draw(box, { points: v.points, baseIndex: 0, ticker: v.ticker, marks: v.stories, range: WATCH.range, height: 130 });
+    } else {
+      const inc = INCIDENTS[i];
+      const baseIndex = Math.max(0, inc.points.findIndex((p) => p.day === inc.base_day));
+      draw(box, { points: inc.points, baseIndex, ticker: inc.ticker, storyMarker: true });
+    }
+  });
 })();
 </script>
 {% endblock %}

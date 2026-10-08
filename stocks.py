@@ -78,6 +78,33 @@ ALIASES = {
     "Mastercard": "MA", "Charles Schwab": "SCHW", "Equifax": "EFX", "TransUnion": "TRU",
 }
 
+# Security vendor watch: big cybersecurity companies, and the names of their own
+# products, so a story about a flaw in FortiGate is marked on Fortinet's chart.
+WATCHLIST = [
+    ("CRWD", "CrowdStrike", r"CrowdStrike|Falcon sensor"),
+    ("PANW", "Palo Alto Networks", r"Palo Alto(?: Networks)?|PAN-OS|GlobalProtect|Cortex XDR|Prisma (?:Access|Cloud)"),
+    ("FTNT", "Fortinet", r"Fortinet|Forti[A-Z][A-Za-z]+"),
+    ("ZS", "Zscaler", r"Zscaler"),
+    ("NET", "Cloudflare", r"Cloudflare"),
+    ("OKTA", "Okta", r"Okta"),
+    ("S", "SentinelOne", r"SentinelOne"),
+    ("CHKP", "Check Point", r"Check Point"),
+]
+SECTOR = ("CIBR", "Cybersecurity sector fund")   # an ETF holding the sector's biggest companies
+WATCH_TRADING_DAYS = 30
+WATCH_SEVERITIES = ("red", "orange")
+# A story marks a vendor when it pairs the vendor's name with one of these...
+_FLAW = (
+    r"(?i:flaws?|vulnerabilit(?:y|ies)|vulnerable|zero[- ]days?|0[- ]days?|CVE-\d{4}-\d+|exploit\w*|bugs?|"
+    r"patch\w*|breach\w*|hack(?:ed|s)?|outage|crash(?:es|ed)?|bypass|RCE|backdoor\w*|compromise[ds]?|"
+    r"targeted|attacks?|stole|stolen|leak\w*|credentials)"
+)
+# ...unless the vendor is the researcher, or its brand is only being faked.
+_NOT_ITS_PRODUCT = (
+    r"(?i:\b(?:fake|spoofed|bogus|counterfeit)\s+(?:\w+\s+)?(?:{name})|(?:{name})[- ]themed|impersonat\w*\s+(?:{name})|"
+    r"(?:{name})(?:['’]s)?\s+(?:Research|researchers?|finds|found|discovers|uncovers|spots|tracks|links|report|threat intelligence))"
+)
+
 # The name shown for a ticker: the first alias listed for it ("UnitedHealth", not "Optum").
 DISPLAY = {}
 for _alias, _ticker in ALIASES.items():
@@ -295,24 +322,19 @@ def find_events(conn):
     return len(events)
 
 
-def update(conn, log=print):
-    """One collector step. Never raises: a failed lookup is retried next run."""
-    contact, key = sec_contact(), av_key()
-    if not contact:
-        log("Stocks: skipped. Add a contact to .sec_contact to turn on (see README).")
-        return
+def _update_breaches(conn, contact, log):
+    """Companies, breach mentions and SEC filings. Returns the breached companies,
+    newest story first."""
     try:
         log(f"Stocks: SEC company list {refresh_companies(conn, contact)}")
     except (requests.RequestException, ValueError, KeyError) as e:
         log(f"Stocks: couldn't fetch the SEC company list ({e.__class__.__name__}); trying next run")
         if not conn.execute("SELECT 1 FROM companies LIMIT 1").fetchone():
-            return
+            return []
     log(f"Stocks: {find_events(conn)} breach mentions of US-listed companies")
 
-    # Newest stories first, so a backlog never starves today's news.
-    follow_from = (datetime.now(timezone.utc) - timedelta(days=FOLLOW_DAYS)).isoformat()
     recent = conn.execute(
-        """SELECT DISTINCT c.cik, c.ticker,
+        """SELECT c.cik, c.ticker,
                   MAX(i.published) AS latest,
                   (SELECT COUNT(*) FROM prices p WHERE p.ticker = c.ticker) AS have
            FROM stock_events e JOIN items i ON i.id = e.item_id JOIN companies c ON c.cik = e.cik
@@ -329,17 +351,34 @@ def update(conn, log=print):
             log(f"Stocks: SEC lookup for {row['ticker']} failed ({e.__class__.__name__})")
         sec_done += 1
         time.sleep(SEC_GAP_SECONDS)
+    return recent
+
+
+def update(conn, log=print):
+    """One collector step. Never raises: a failed lookup is retried next run."""
+    contact, key = sec_contact(), av_key()
+    recent = []
+    if contact:
+        recent = _update_breaches(conn, contact, log)
+    else:
+        log("Stocks: breach tracking off. Add a contact to .sec_contact to turn on (see README).")
 
     if not key:
         log("Stocks: no Alpha Vantage key in .alphavantage_key, so no prices")
         return
-    wanted = [MARKET] + [r["ticker"] for r in recent if r["latest"] >= follow_from or not r["have"]]
-    used_today = conn.execute(
-        "SELECT COUNT(*) FROM lookups WHERE kind = 'prices' AND day = ?", (_today(),)
-    ).fetchone()[0]
     if _looked_up_today(conn, "prices-limit", "all"):
         log("Stocks: Alpha Vantage's daily limit was reached earlier today; prices resume tomorrow")
         return
+
+    # The market first (every chart needs it), then breach victims, newest story
+    # first, then the vendor watch.
+    follow_from = (datetime.now(timezone.utc) - timedelta(days=FOLLOW_DAYS)).isoformat()
+    wanted = [MARKET]
+    wanted += [r["ticker"] for r in recent if r["latest"] >= follow_from or not r["have"]]
+    wanted += [ticker for ticker, _, _ in WATCHLIST] + [SECTOR[0]]
+    used_today = conn.execute(
+        "SELECT COUNT(*) FROM lookups WHERE kind = 'prices' AND day = ?", (_today(),)
+    ).fetchone()[0]
     fetched = 0
     for ticker in dict.fromkeys(wanted):
         if fetched >= AV_PER_RUN or used_today >= AV_DAILY_BUDGET:
@@ -419,6 +458,71 @@ def incidents(conn):
     return grouped
 
 
+def product_stories(conn, since):
+    """Major and Medium stories about a flaw or breach in each vendor's own products:
+    {ticker: [story, ...]}, oldest first."""
+    rows = conn.execute(
+        f"""SELECT id, title, link, source, published, severity FROM items
+            WHERE severity IN ({",".join("?" * len(WATCH_SEVERITIES))}) AND published >= ?
+            ORDER BY published""",
+        (*WATCH_SEVERITIES, since),
+    ).fetchall()
+    found = {ticker: [] for ticker, _, _ in WATCHLIST}
+    for ticker, _, names in WATCHLIST:
+        mention = re.compile(rf"\b(?:{names})\b")
+        not_its = re.compile(_NOT_ITS_PRODUCT.format(name=names))
+        for row in rows:
+            title = row["title"]
+            if mention.search(title) and re.search(rf"\b{_FLAW}\b", title) and not not_its.search(title):
+                found[ticker].append(dict(row))
+    return found
+
+
+def vendor_watch(conn):
+    """The watchlist's last WATCH_TRADING_DAYS against the market, with product stories
+    pinned to the trading day they landed on. All charts share one scale."""
+    market = {r["day"]: r["close"] for r in conn.execute(
+        "SELECT day, close FROM prices WHERE ticker = ? ORDER BY day DESC LIMIT ?", (MARKET, WATCH_TRADING_DAYS + 1))}
+    days = sorted(market)
+    if len(days) < 2:
+        return {"vendors": [], "sector": None, "range": None}
+    stories = product_stories(conn, days[0] + "T00:00:00+00:00")
+
+    def one(ticker, name):
+        closes = _series(conn, ticker, days[0], days[-1])
+        shared = [d for d in days if d in closes]
+        if len(shared) < 2:
+            return {"ticker": ticker, "company": name, "points": [], "change": None, "market_change": None}
+        first, last = shared[0], shared[-1]
+        return {
+            "ticker": ticker, "company": name,
+            "points": [{"day": d, "close": closes[d], "market": market[d]} for d in shared],
+            "change": closes[last] / closes[first] - 1,
+            "market_change": market[last] / market[first] - 1,
+            "from": first, "through": last,
+        }
+
+    vendors = []
+    for ticker, name, _ in WATCHLIST:
+        v = one(ticker, name)
+        marks = []
+        for s in stories[ticker]:
+            day = s["published"][:10]
+            # Weekend and after-hours stories land on the next trading day on the chart.
+            landed = next((d for d in (p["day"] for p in v["points"]) if d >= day), None)
+            marks.append({**s, "day": landed or (v["points"][-1]["day"] if v["points"] else day)})
+        v["stories"] = marks
+        vendors.append(v)
+
+    moves = [p["close"] / v["points"][0]["close"] - 1 for v in vendors for p in v["points"]]
+    moves += [p["market"] / v["points"][0]["market"] - 1 for v in vendors for p in v["points"]]
+    return {
+        "vendors": vendors,
+        "sector": one(*SECTOR),
+        "range": [min(moves + [0]), max(moves + [0])] if moves else None,
+    }
+
+
 def main():
     from db import connect
 
@@ -435,6 +539,13 @@ def main():
             print("    no price data around the story yet")
         for f in g["filings"]:
             print(f"    SEC {f['form']} Item 1.05 filed {f['filed']}: {f['url']}")
+    watch = vendor_watch(conn)
+    print(f"\nSecurity vendor watch (last {WATCH_TRADING_DAYS} trading days):\n")
+    for v in watch["vendors"] + ([watch["sector"]] if watch["sector"] else []):
+        move = "no prices yet" if v["change"] is None else f"{v['change']:+.1%} (S&P 500 {v['market_change']:+.1%})"
+        print(f"  {v['company']:<26} {v['ticker']:<5} {move}")
+        for s in v.get("stories", []):
+            print(f"      {s['day']}  [{s['severity']}] {s['title']}")
     conn.close()
 
 

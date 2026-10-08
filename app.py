@@ -188,13 +188,19 @@ def attach_stock_summaries(items):
 
 @app.route("/stocks")
 def stock_impact():
-    incidents = load_incidents()
-    for inc in incidents:
-        for story in inc["stories"]:
-            story["link"] = safe_link(story["link"])
+    conn = connect()
+    try:
+        incidents = stocks.incidents(conn)
+        watch = stocks.vendor_watch(conn)
+    finally:
+        conn.close()
+    for story in [s for inc in incidents for s in inc["stories"]] + [s for v in watch["vendors"] for s in v["stories"]]:
+        story["link"] = safe_link(story["link"])
     return render_template(
         "stocks.html",
         incidents=incidents,
+        watch=watch,
+        watch_days=stocks.WATCH_TRADING_DAYS,
         has_prices_key=bool(stocks.av_key()),
         has_sec_contact=bool(stocks.sec_contact()),
         lookback=stocks.LOOKBACK_DAYS,
