@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% set active = "events" %}
+
+{% block title %}Submit an event · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .page { flex: 1; overflow-y: auto; padding: 32px 20px 56px; }
+  .page-inner { max-width: 640px; margin: 0 auto; }
+  .page h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; font-weight: 600; }
+  .lede { color: #c5cad1; margin: 0 0 24px; }
+  .back { font: 12.5px var(--mono); color: var(--muted); text-decoration: none; display: inline-block; margin: 0 0 16px; }
+  .back:hover { color: var(--text); }
+
+  form { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 22px 20px; }
+  .field { margin: 0 0 18px; }
+  .field > label, .field > .label, fieldset legend { display: block; font-size: 14px; font-weight: 600; margin: 0 0 6px; padding: 0; }
+  .optional { font-weight: 400; color: var(--muted); font-size: 13px; }
+  .hint { font-size: 12.5px; color: var(--muted); margin: 5px 0 0; }
+  #tz-note { margin: -8px 0 20px; }
+  .error { font-size: 13px; color: var(--red); margin: 6px 0 0; }
+  input[type="text"], input[type="url"], input[type="email"], input[type="datetime-local"], select, textarea {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px 12px; font: 14px var(--sans); color: var(--text); color-scheme: dark;
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--muted); }
+  input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--red); }
+  textarea { min-height: 110px; resize: vertical; line-height: 1.45; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  fieldset { border: 0; margin: 0 0 18px; padding: 0; }
+  .choices { display: flex; flex-wrap: wrap; gap: 16px; font-size: 14px; }
+  .choices label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  .counter { font: 12px var(--mono); color: var(--muted); text-align: right; margin: 4px 0 0; }
+  /* The trap field: off-screen for people, still in the form for bots. */
+  .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+  .submit {
+    background: var(--text); color: var(--bg); border: 0; border-radius: 6px;
+    padding: 11px 22px; font-weight: 600; cursor: pointer; font-size: 15px;
+  }
+  .submit:hover { background: #fff; }
+  .rules { font-size: 13px; color: var(--muted); margin: 14px 0 0; }
+  .problem { border: 1px solid var(--line); border-left: 3px solid var(--red); background: var(--panel); padding: 12px 14px; margin: 0 0 18px; font-size: 14px; }
+  .done { border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 8px; background: var(--panel); padding: 22px 20px; }
+  .done h2 { font-size: 19px; margin: 0 0 8px; }
+  .done p { color: #c5cad1; margin: 0 0 14px; }
+  .done a { color: var(--text); }
+
+  @media (max-width: 560px) {
+    .page { padding: 24px 14px 40px; }
+    .page h1 { font-size: 22px; }
+    form { padding: 18px 14px; }
+    .row { grid-template-columns: 1fr; gap: 0; }
+  }
+</style>
+{% endblock %}
+
+{% macro err(name) -%}
+  {%- if errors.get(name) %}<p class="error" id="{{ name }}-error">{{ errors[name] }}</p>{% endif -%}
+{%- endmacro %}
+{% macro invalid(name) -%}
+  {%- if errors.get(name) %} aria-invalid="true" aria-describedby="{{ name }}-error"{% endif -%}
+{%- endmacro %}
+
+{% block body %}
+<main class="page">
+  <div class="page-inner">
+    <a class="back" href="/events">← All events</a>
+
+    {% if sent %}
+      <section class="done" aria-live="polite">
+        <h2>Thanks, your event was sent</h2>
+        <p>Every listing is checked by hand before it appears, so it won't show up straight away. Approved events appear on the Events page and, in the two weeks before they start, under the feed's Events tile.</p>
+        <p><a href="/events/submit">Submit another event</a> · <a href="/events">Back to events</a></p>
+      </section>
+    {% else %}
+      <h1>Submit an event</h1>
+      <p class="lede">CTFs, webinars, conferences, meetups and workshops about cybersecurity. Nothing goes live until it's been checked.</p>
+
+      {% if problem %}<p class="problem" role="alert">{{ problem }}</p>{% endif %}
+      {% if errors %}<p class="problem" role="alert">Some details need fixing. They're marked below.</p>{% endif %}
+
+      <form method="post" action="/events/submit" novalidate>
+        <input type="hidden" name="token" value="{{ token }}">
+        <input type="hidden" name="tz" id="tz" value="{{ form.get('tz') or default_tz }}">
+        <div class="hp" aria-hidden="true">
+          <label for="website">Leave this empty</label>
+          <input type="text" id="website" name="website" tabindex="-1" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label for="title">Event name</label>
+          <input type="text" id="title" name="title" maxlength="120" required value="{{ form.get('title', '') }}"{{ invalid('title') }}>
+          {{ err('title') }}
+        </div>
+
+        <div class="field">
+          <label for="kind">Type</label>
+          <select id="kind" name="kind" required{{ invalid('kind') }}>
+            <option value="">Choose…</option>
+            {% for key, label in kinds %}
+              <option value="{{ key }}"{% if form.get('kind') == key %} selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          {{ err('kind') }}
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label for="starts">Starts</label>
+            <input type="datetime-local" id="starts" name="starts" required value="{{ form.get('starts', '') }}"{{ invalid('starts') }}>
+            {{ err('starts') }}
+          </div>
+          <div class="field">
+            <label for="ends">Ends <span class="optional">(optional)</span></label>
+            <input type="datetime-local" id="ends" name="ends" value="{{ form.get('ends', '') }}"{{ invalid('ends') }}>
+            {{ err('ends') }}
+          </div>
+        </div>
+        <p class="hint" id="tz-note">Times are in <strong id="tz-name">{{ form.get('tz') or default_tz }}</strong> time.</p>
+
+        <fieldset>
+          <legend>Where</legend>
+          <div class="choices">
+            <label><input type="radio" name="online" value="yes"{% if form.get('online', 'yes') == 'yes' %} checked{% endif %}> Online</label>
+            <label><input type="radio" name="online" value="no"{% if form.get('online') == 'no' %} checked{% endif %}> In person</label>
+          </div>
+        </fieldset>
+        <div class="field" id="location-field">
+          <label for="location">Venue and city <span class="optional">(for in-person events)</span></label>
+          <input type="text" id="location" name="location" maxlength="120" value="{{ form.get('location', '') }}"{{ invalid('location') }}>
+          {{ err('location') }}
+        </div>
+
+        <div class="field">
+          <label for="url">Event page</label>
+          <input type="url" id="url" name="url" maxlength="300" placeholder="https://" required value="{{ form.get('url', '') }}"{{ invalid('url') }}>
+          {{ err('url') }}
+        </div>
+
+        <div class="field">
+          <label for="organiser">Organiser</label>
+          <input type="text" id="organiser" name="organiser" maxlength="80" required value="{{ form.get('organiser', '') }}"{{ invalid('organiser') }}>
+          {{ err('organiser') }}
+        </div>
+
+        <div class="field">
+          <label for="description">Short description <span class="optional">(optional)</span></label>
+          <textarea id="description" name="description" maxlength="600" aria-describedby="description-count">{{ form.get('description', '') }}</textarea>
+          <p class="counter" id="description-count">up to 600 characters</p>
+        </div>
+
+        <div class="field">
+          <label for="contact">Your email <span class="optional">(optional)</span></label>
+          <input type="email" id="contact" name="contact" maxlength="120" autocomplete="email" value="{{ form.get('contact', '') }}" aria-describedby="contact-hint{% if errors.get('contact') %} contact-error{% endif %}"{% if errors.get('contact') %} aria-invalid="true"{% endif %}>
+          <p class="hint" id="contact-hint">Only in case there's a question about the listing. It's never shown on the site.</p>
+          {{ err('contact') }}
+        </div>
+
+        <button type="submit" class="submit">Send for review</button>
+        <p class="rules">Listings must be about cybersecurity and open to the public. Don't put anyone's personal details in the description.</p>
+      </form>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Use the visitor's own time zone for the times they enter.
+  const tz = document.getElementById("tz");
+  if (!tz) return;
+  try {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (zone && !{{ form.get('tz') | tojson }}) {
+      tz.value = zone;
+      document.getElementById("tz-name").textContent = zone;
+    }
+  } catch (e) { /* keep the default */ }
+
+  // Only show the venue box for in-person events (it stays visible without JavaScript).
+  const locationField = document.getElementById("location-field");
+  function toggleLocation() {
+    const inPerson = document.querySelector('input[name="online"]:checked').value === "no";
+    locationField.hidden = !inPerson;
+  }
+  document.querySelectorAll('input[name="online"]').forEach((r) => r.addEventListener("change", toggleLocation));
+  toggleLocation();
+
+  const desc = document.getElementById("description"), count = document.getElementById("description-count");
+  function updateCount() { count.textContent = desc.value.length + " / 600"; }
+  desc.addEventListener("input", updateCount);
+  if (desc.value) updateCount();
+})();
+</script>
+{% endblock %}

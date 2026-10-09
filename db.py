@@ -59,6 +59,28 @@ CREATE TABLE IF NOT EXISTS sec_filings (    -- 8-Ks reporting a material cyber i
     filed       TEXT NOT NULL,
     url         TEXT NOT NULL
 );
+-- Events people submit (events.py). Nothing shows on the site until it's approved
+-- from the Pi's command line.
+CREATE TABLE IF NOT EXISTS events (
+    id           INTEGER PRIMARY KEY,
+    title        TEXT NOT NULL,
+    kind         TEXT NOT NULL,         -- ctf, webinar, conference, meetup, workshop, training, other
+    starts_at    TEXT NOT NULL,         -- UTC
+    ends_at      TEXT,                  -- UTC, optional
+    tz           TEXT NOT NULL,         -- the submitter's time zone, for showing the original time
+    online       INTEGER NOT NULL,
+    location     TEXT,
+    url          TEXT NOT NULL,
+    organiser    TEXT NOT NULL,
+    description  TEXT,
+    contact      TEXT,                  -- optional, never shown on the site
+    status       TEXT NOT NULL DEFAULT 'pending',   -- pending, approved, rejected
+    submitted_at TEXT NOT NULL,
+    reviewed_at  TEXT,
+    submitter    TEXT                   -- keyed hash of the visitor's IP, for rate limiting only
+);
+CREATE INDEX IF NOT EXISTS idx_events_status ON events(status, starts_at);
+
 -- When each outside lookup last ran, so each one happens at most once a day.
 CREATE TABLE IF NOT EXISTS lookups (
     kind        TEXT NOT NULL,          -- 'prices', 'sec', 'companies'

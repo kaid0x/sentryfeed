@@ -290,9 +290,10 @@
       cves.append(a);
     }
 
-    $("d-summary").textContent = item.summary || "No summary in the feed.";
+    $("d-summary").textContent = item.summary || (item.event ? "No description given." : "No summary in the feed.");
 
     const link = $("d-link");
+    link.textContent = item.event ? "Event page ↗" : "Read the article ↗";
     if (item.link) { link.href = item.link; link.hidden = false; }
     else { link.hidden = true; }
 

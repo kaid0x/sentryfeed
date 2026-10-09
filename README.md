@@ -101,6 +101,28 @@ The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (pu
 
 **Data and limits.** The collector checks each company's SEC filings and Alpha Vantage prices at most once a day: the S&P 500 first, then breach victims (newest story first), then the vendor watch, which takes 10 lookups. It stops at 20 price lookups a day (the free key allows 25), and for the rest of the day if Alpha Vantage says the limit is reached. `python stocks.py` runs an update by hand and prints every incident and the vendor watch.
 
+## Events
+
+`/events` lists cybersecurity events (CTFs, webinars, conferences, meetups, workshops) submitted through `/events/submit` by the people running them. Events starting in the next two weeks also appear under the feed's blue Events tile.
+
+**Nothing goes live until it's approved on the Pi's command line.** There's deliberately no admin page yet, so there's no login to attack:
+
+```bash
+python events.py pending           # what's waiting, with the submitter's optional contact email
+python events.py approve 4 5       # or: reject 4, remove 4 (take down an approved event), list
+```
+
+**Spam and abuse protection:**
+- The form carries a signed, timed token (from a random key in `.flask_secret`, made on first run and never committed). Forged tokens and forms left open for over two hours are refused.
+- A hidden field that people never see, plus a minimum fill-in time of 3 seconds. Bots that trip either get the normal "thanks" page, and nothing is saved.
+- Each visitor can submit 3 events a day, tracked by a keyed hash of their IP so the IP itself isn't stored. The form stops taking submissions while 50 are waiting.
+- Every field is cleaned server-side: control and right-to-left override characters are removed, lengths are capped, links must be http(s) without embedded credentials, and the review command never prints raw submitted text to the terminal. Pages escape everything, as with feed content.
+- The contact email is optional and only appears in `python events.py pending`, never on the site.
+
+Times are entered in the submitter's own time zone (picked up by the browser, Dubai if JavaScript is off), stored in UTC, and shown in each visitor's own time zone.
+
+**Why CTFs aren't imported automatically:** CTFtime's API is "provided for data analysis and mobile applications only" and can't be used to run CTFtime clones, so the Events page links to CTFtime's calendar instead of copying it.
+
 ## Merging duplicate stories
 
 `dedupe.py` groups articles from different outlets that cover the same story. Two articles match when they come from different sources, were published within 72 hours of each other, and either mention the same CVE or have similar titles.
@@ -155,10 +177,12 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
+- Event rate limits use the visitor's IP. Behind a proxy (Vercel, later) every visitor shares the proxy's address, so the real IP has to be read from the proxy's header first.
 - Stock impact covers US-listed companies only, and only spots a victim named in the headline. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
 
 - Stock impact for companies on other exchanges, such as Dubai (DFM), Abu Dhabi (ADX) and London (LSE). Each needs its own list of listed companies, a price source that covers it, and handling for different currencies and trading days.
+- An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the Pi's command line.
 - A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.

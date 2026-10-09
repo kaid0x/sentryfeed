@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% set active = "events" %}
+
+{% block title %}Events · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .page { flex: 1; overflow-y: auto; padding: 32px 20px 56px; }
+  .page-inner { max-width: 820px; margin: 0 auto; }
+  .page h1 { font-size: 26px; line-height: 1.25; margin: 0 0 10px; font-weight: 600; }
+  .lede { color: #c5cad1; margin: 0 0 20px; max-width: 680px; }
+
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 26px; }
+  .btn {
+    display: inline-block; font-size: 14px; text-decoration: none; border-radius: 6px; padding: 9px 16px;
+    border: 1px solid var(--text);
+  }
+  .btn.primary { background: var(--text); color: var(--bg); font-weight: 600; }
+  .btn.primary:hover { background: #fff; }
+  .btn.secondary { border-color: var(--line); color: #c5cad1; }
+  .btn.secondary:hover { border-color: var(--text); color: var(--text); }
+
+  .filters { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; padding: 0; list-style: none; }
+  .chip {
+    font: 12.5px var(--mono); color: var(--muted); background: none; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px;
+  }
+  .chip:hover { color: var(--text); border-color: var(--muted); }
+  .chip[aria-pressed="true"] { color: var(--bg); background: var(--blue); border-color: var(--blue); }
+  .count { font: 12.5px var(--mono); color: var(--muted); margin: 0 0 12px; }
+
+  .events { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .event {
+    display: grid; grid-template-columns: 64px 1fr; gap: 16px;
+    border: 1px solid var(--line); border-left: 3px solid var(--blue); border-radius: 8px;
+    background: var(--panel); padding: 16px 18px;
+  }
+  .date { text-align: center; line-height: 1.1; padding-top: 2px; }
+  .date .day { display: block; font: 600 26px var(--mono); color: var(--blue); }
+  .date .month { display: block; font: 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .event h2 { font-size: 17px; line-height: 1.35; margin: 0 0 6px; font-weight: 600; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 12px var(--mono); color: var(--muted); margin: 0 0 8px; }
+  .kind { color: var(--blue); text-transform: uppercase; letter-spacing: 0.05em; }
+  .soon { color: var(--text); }
+  .desc { color: #c5cad1; font-size: 14px; margin: 0 0 10px; white-space: pre-line; overflow-wrap: anywhere; }
+  .link { font-size: 14px; }
+
+  .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 28px 20px; color: var(--muted); text-align: center; }
+  .empty a { color: var(--text); }
+  .note { font-size: 13px; color: var(--muted); margin: 28px 0 0; }
+
+  @media (max-width: 560px) {
+    .page { padding: 24px 14px 40px; }
+    .page h1 { font-size: 22px; }
+    .event { grid-template-columns: 48px 1fr; gap: 12px; padding: 14px; }
+    .date .day { font-size: 21px; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="page">
+  <div class="page-inner">
+    <h1>Cybersecurity events</h1>
+    <p class="lede">CTFs, webinars, conferences and meetups, submitted by the people running them and checked by hand before they appear. Times are shown in your time zone.</p>
+
+    <div class="actions">
+      <a class="btn primary" href="/events/submit">Submit an event</a>
+      <a class="btn secondary" href="https://ctftime.org/event/list/upcoming" target="_blank" rel="noopener noreferrer">Full CTF calendar on CTFtime ↗</a>
+    </div>
+
+    {% if events %}
+      <ul class="filters" id="filters" aria-label="Filter by type">
+        <li><button class="chip" data-kind="" aria-pressed="true">All</button></li>
+        {% for key, label in kinds if events | selectattr("kind", "equalto", key) | list %}
+          <li><button class="chip" data-kind="{{ key }}" aria-pressed="false">{{ label }}</button></li>
+        {% endfor %}
+        <li><button class="chip" data-online="1" aria-pressed="false">Online only</button></li>
+      </ul>
+      <p class="count" id="count" aria-live="polite">{{ events | length }} upcoming</p>
+
+      <ul class="events" id="events">
+        {% for e in events %}
+          <li class="event" data-kind="{{ e.kind }}" data-online="{{ e.online }}">
+            <div class="date" aria-hidden="true">
+              <span class="day" data-start="{{ e.starts_at }}" data-part="day">{{ e.day }}</span>
+              <span class="month" data-start="{{ e.starts_at }}" data-part="month">{{ e.month }}</span>
+            </div>
+            <div>
+              <h2>{{ e.title }}</h2>
+              <p class="meta">
+                <span class="kind">{{ e.kind_label }}</span>
+                <time datetime="{{ e.starts_at }}" data-start="{{ e.starts_at }}"{% if e.ends_at %} data-end="{{ e.ends_at }}"{% endif %}>{{ e.starts_display }}</time>
+                <span class="soon">{{ e.when }}</span>
+                <span>{{ e.where }}</span>
+                <span>by {{ e.organiser }}</span>
+              </p>
+              {% if e.description %}<p class="desc">{{ e.description }}</p>{% endif %}
+              {% if e.url %}<a class="link" href="{{ e.url }}" target="_blank" rel="noopener noreferrer">Event page ↗</a>{% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No upcoming events listed yet. Running one? <a href="/events/submit">Submit it</a>, or browse the <a href="https://ctftime.org/event/list/upcoming" target="_blank" rel="noopener noreferrer">CTF calendar on CTFtime</a>.</p>
+    {% endif %}
+
+    <p class="note">Listings are checked before they go live, but SentryFeed doesn't run these events. Check the organiser's page before registering or paying for anything.</p>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Show each event in the visitor's own time zone. Without JavaScript the
+  // server's Dubai time stays, labelled as such.
+  const dateFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
+  const endFmt = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  document.querySelectorAll("time[data-start]").forEach((el) => {
+    const start = new Date(el.dataset.start);
+    let text = dateFmt.format(start);
+    if (el.dataset.end) text += " to " + endFmt.format(new Date(el.dataset.end));
+    el.textContent = text;
+  });
+  document.querySelectorAll(".date [data-start]").forEach((el) => {
+    const d = new Date(el.dataset.start);
+    el.textContent = el.dataset.part === "day" ? d.getDate() : d.toLocaleString(undefined, { month: "short" });
+  });
+
+  const filters = document.getElementById("filters");
+  if (!filters) return;
+  let kind = "", onlineOnly = false;
+  function apply() {
+    let shown = 0;
+    document.querySelectorAll("#events .event").forEach((li) => {
+      const visible = (!kind || li.dataset.kind === kind) && (!onlineOnly || li.dataset.online === "1");
+      li.hidden = !visible;
+      if (visible) shown++;
+    });
+    document.getElementById("count").textContent = shown + (shown === 1 ? " upcoming event" : " upcoming events");
+  }
+  filters.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    if (chip.dataset.online) {
+      onlineOnly = !onlineOnly;
+      chip.setAttribute("aria-pressed", String(onlineOnly));
+    } else {
+      kind = chip.dataset.kind;
+      filters.querySelectorAll(".chip[data-kind]").forEach((c) => c.setAttribute("aria-pressed", String(c === chip)));
+    }
+    apply();
+  });
+  apply();
+})();
+</script>
+{% endblock %}

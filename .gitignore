@@ -3,6 +3,7 @@ sentryfeed.db
 .nvd_api_key
 .alphavantage_key
 .sec_contact
+.flask_secret
 
 venv/
 __pycache__/

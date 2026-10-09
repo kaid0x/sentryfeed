@@ -1,18 +1,49 @@
+import os
 import re
 import secrets
+import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlparse
 
 import requests
-from flask import Flask, Response, g, jsonify, render_template, request
+from flask import Flask, Response, g, jsonify, redirect, render_template, request, url_for
+from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from db import DB_PATH, connect
 from dedupe import group_stories
 from geo import NAMES as COUNTRY_NAMES, locate
+import events
 import stocks
 
+SECRET_FILE = Path(__file__).with_name(".flask_secret")
+
+
+def load_secret():
+    """A random key made on first run and kept in .flask_secret (never committed).
+    O_EXCL means two gunicorn workers starting at once can't each make a different key."""
+    try:
+        fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        for _ in range(50):        # the other worker may still be writing it
+            key = SECRET_FILE.read_text().strip()
+            if key:
+                return key
+            time.sleep(0.05)
+        raise RuntimeError(".flask_secret is empty; delete it and restart")
+    key = secrets.token_hex(32)
+    with os.fdopen(fd, "w") as f:
+        f.write(key)
+    return key
+
+
 app = Flask(__name__)
+app.config["SECRET_KEY"] = load_secret()
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024     # forms only; nothing big is ever posted
+FORM_SIGNER = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="event-form")
+FORM_MAX_AGE = 2 * 3600       # a form left open longer than this has to be reloaded
+FORM_MIN_SECONDS = 3          # people take longer than this to fill it in; bots often don't
 
 PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
 HASH_PREFIX_RE = re.compile(r"^[0-9A-F]{5}$")
@@ -147,8 +178,18 @@ def security_headers(resp):
 def index():
     days = window_days()
     items = load_items(days)
-    counts = Counter(i["severity"] for i in items)
     attach_stock_summaries(items)
+    # Listed events starting soon join the event posts under the Events tile, first.
+    conn = connect()
+    try:
+        listed = events.as_feed_items(events.upcoming(conn, within=events.SHOW_ON_FEED))
+    finally:
+        conn.close()
+    for item in listed:
+        item["link"] = safe_link(item["link"])
+    first_blue = next((i for i, item in enumerate(items) if item["severity"] == "blue"), len(items))
+    items[first_blue:first_blue] = listed
+    counts = Counter(i["severity"] for i in items)
     return render_template(
         "index.html",
         items=items,
@@ -228,6 +269,61 @@ def world_map():
         days=days,
         updated=last_updated(),
     )
+
+
+@app.route("/events")
+def events_page():
+    conn = connect()
+    try:
+        upcoming = events.upcoming(conn)
+    finally:
+        conn.close()
+    for e in upcoming:
+        e["url"] = safe_link(e["url"])
+    return render_template("events.html", events=upcoming, kinds=events.KINDS)
+
+
+def visitor_address():
+    # Behind a reverse proxy (Vercel later) this becomes the proxy's address; see README.
+    return request.remote_addr or ""
+
+
+@app.route("/events/submit", methods=["GET", "POST"])
+def submit_event():
+    if request.method == "GET":
+        return render_template("event_submit.html", kinds=events.KINDS, form={}, errors={},
+                               token=FORM_SIGNER.dumps(int(time.time())),
+                               sent=request.args.get("sent") == "1", default_tz=events.DEFAULT_TZ)
+
+    form = request.form
+    def again(errors, problem=None):
+        return render_template("event_submit.html", kinds=events.KINDS, form=form, errors=errors,
+                               problem=problem, token=FORM_SIGNER.dumps(int(time.time())),
+                               sent=False, default_tz=events.DEFAULT_TZ), 400
+
+    # Bots: a hidden field people never see, and a form filled in impossibly fast.
+    # Both get the normal "thanks" page so they learn nothing, and nothing is saved.
+    try:
+        issued = FORM_SIGNER.loads(form.get("token", ""), max_age=FORM_MAX_AGE)
+    except BadSignature:
+        return again({}, "This form expired. Please check the details and submit again.")
+    if form.get("website") or time.time() - issued < FORM_MIN_SECONDS:
+        return redirect(url_for("submit_event", sent=1), code=303)
+
+    data, errors = events.validate(form)
+    if errors:
+        return again(errors)
+    conn = connect()
+    try:
+        submitter = events.visitor_key(app.config["SECRET_KEY"], visitor_address())
+        refusal = events.can_submit(conn, submitter)
+        if refusal:
+            return again({}, refusal)
+        events.save(conn, data, submitter)
+    finally:
+        conn.close()
+    # Redirect after posting, so refreshing the thanks page doesn't submit it twice.
+    return redirect(url_for("submit_event", sent=1), code=303)
 
 
 @app.route("/api/items")
