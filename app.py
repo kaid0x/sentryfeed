@@ -220,7 +220,8 @@ def attach_stock_summaries(items):
     """Give each feed story that names a breached US-listed company a one-line stock summary."""
     by_item = {}
     for inc in load_incidents():
-        summary = {k: inc[k] for k in ("company", "ticker", "change", "market_change")}
+        summary = {k: inc[k] for k in ("company", "display_ticker", "change", "market_change",
+                                         "market_name", "no_prices", "exchange", "us")}
         summary["sec"] = bool(inc["filings"])
         for story in inc["stories"]:
             by_item.setdefault(story["item_id"], summary)

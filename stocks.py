@@ -17,6 +17,7 @@ Run `python stocks.py` to update and print what it found.
 """
 import re
 import time
+import zlib
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -106,6 +107,149 @@ _NOT_ITS_PRODUCT = (
     r"(?:{name})(?:['’]s)?\s+(?:Research|researchers?|finds|found|discovers|uncovers|spots|tracks|links|report|threat intelligence))"
 )
 
+# Companies listed outside the US, matched by name in headlines. The SEC's list only
+# covers US listings, so these are hand-picked: London's biggest and most-breached
+# names, and the large Dubai and Abu Dhabi companies. (ticker, name shown, pattern).
+# London tickers are Alpha Vantage symbols. Dubai and Abu Dhabi symbols are as the
+# exchanges show them; no free price source covers those exchanges, so their cards
+# have no chart (ADX's own data service has a free tier worth checking later).
+INTERNATIONAL = {
+    "LSE": {
+        "label": "London Stock Exchange", "benchmark": ("ISF.LON", "FTSE 100"), "currency": "GBX",
+        "listings": [
+            ("MKS.LON", "Marks & Spencer", r"Marks (?:&|and) Spencer|\bM&S\b"),
+            ("CPI.LON", "Capita", r"\bCapita\b"),
+            ("TSCO.LON", "Tesco", r"\bTesco\b"),
+            ("SBRY.LON", "Sainsbury's", r"Sainsbury['’]?s?|\bArgos\b"),
+            ("BARC.LON", "Barclays", r"Barclays"),
+            ("LLOY.LON", "Lloyds Banking Group", r"Lloyds(?: Bank(?:ing Group)?)?|\bHalifax\b|Bank of Scotland"),
+            ("HSBA.LON", "HSBC", r"\bHSBC\b"),
+            ("NWG.LON", "NatWest", r"NatWest|Royal Bank of Scotland|\bRBS\b"),
+            ("STAN.LON", "Standard Chartered", r"Standard Chartered"),
+            ("VOD.LON", "Vodafone", r"Vodafone"),
+            ("BT-A.LON", "BT Group", r"\bBT Group\b|\bBT\b(?= customers| broadband| says| confirms)|Openreach"),
+            ("BP.LON", "BP", r"\bBP\b"),
+            ("SHEL.LON", "Shell", r"\bShell\b(?! [Cc]ompan)"),
+            ("ULVR.LON", "Unilever", r"Unilever"),
+            ("AZN.LON", "AstraZeneca", r"AstraZeneca"),
+            ("GSK.LON", "GSK", r"\bGSK\b|GlaxoSmithKline"),
+            ("RR.LON", "Rolls-Royce", r"Rolls-Royce"),
+            ("BA.LON", "BAE Systems", r"BAE Systems"),
+            ("EXPN.LON", "Experian", r"Experian"),
+            ("SGE.LON", "Sage Group", r"Sage Group"),
+            ("JD.LON", "JD Sports", r"JD Sports"),
+            ("KGF.LON", "Kingfisher", r"Kingfisher plc|\bB&Q\b|Screwfix"),
+            ("WPP.LON", "WPP", r"\bWPP\b"),
+            ("PSON.LON", "Pearson", r"\bPearson\b"),
+            ("BRBY.LON", "Burberry", r"Burberry"),
+            ("EZJ.LON", "easyJet", r"easyJet"),
+            ("IAG.LON", "IAG (British Airways)", r"British Airways|\bIAG\b|Aer Lingus|Vueling"),
+            ("AV.LON", "Aviva", r"\bAviva\b"),
+            ("LGEN.LON", "Legal & General", r"Legal (?:&|and) General"),
+            ("DGE.LON", "Diageo", r"Diageo"),
+            ("RIO.LON", "Rio Tinto", r"Rio Tinto"),
+            ("GLEN.LON", "Glencore", r"Glencore"),
+            ("NG.LON", "National Grid", r"National Grid"),
+            ("CNA.LON", "Centrica (British Gas)", r"Centrica|British Gas"),
+            ("SVT.LON", "Severn Trent", r"Severn Trent"),
+            ("UU.LON", "United Utilities", r"United Utilities"),
+            ("PNN.LON", "Pennon (South West Water)", r"Pennon|South West Water"),
+            ("ITV.LON", "ITV", r"\bITV\b"),
+            ("OCDO.LON", "Ocado", r"\bOcado\b"),
+            ("FRAS.LON", "Frasers Group", r"Frasers Group|Sports Direct|House of Fraser"),
+            ("LSEG.LON", "London Stock Exchange Group", r"London Stock Exchange Group|\bLSEG\b"),
+            ("REL.LON", "RELX", r"\bRELX\b|LexisNexis"),
+            ("WTB.LON", "Whitbread (Premier Inn)", r"Whitbread|Premier Inn"),
+            ("IHG.LON", "IHG Hotels", r"\bIHG\b|InterContinental Hotels|Holiday Inn"),
+            ("MNG.LON", "M&G", r"\bM&G\b"),
+            ("ADM.LON", "Admiral Group", r"Admiral Group"),
+            ("AUTO.LON", "Auto Trader", r"Auto Trader"),
+        ],
+    },
+    "DFM": {
+        "label": "Dubai Financial Market", "benchmark": None,
+        "disclosures": "https://www.dfm.ae/the-exchange/news-disclosures/disclosures",
+        "listings": [
+            ("EMAAR", "Emaar Properties", r"\bEmaar\b(?! Development)"),
+            ("EMAARDEV", "Emaar Development", r"Emaar Development"),
+            ("EMIRATESNBD", "Emirates NBD", r"Emirates NBD|\bENBD\b"),
+            ("DIB", "Dubai Islamic Bank", r"Dubai Islamic Bank"),
+            ("CBD", "Commercial Bank of Dubai", r"Commercial Bank of Dubai"),
+            ("MASQ", "Mashreq", r"\bMashreq(?:bank)?\b"),
+            ("DU", "du (Emirates Integrated Telecommunications)",
+             r"Emirates Integrated Telecommunications|\bEITC\b|(?<=telco )du\b|(?<=operator )du\b|\bdu(?= telecom| customers| subscribers)"),
+            ("DEWA", "Dubai Electricity and Water Authority", r"\bDEWA\b|Dubai Electricity (?:and|&) Water"),
+            ("SALIK", "Salik", r"\bSalik\b"),
+            ("PARKIN", "Parkin", r"\bParkin\b"),
+            ("AIRARABIA", "Air Arabia", r"Air Arabia"),
+            ("ARMX", "Aramex", r"Aramex"),
+            ("TALABAT", "Talabat", r"Talabat"),
+            ("TECOM", "TECOM Group", r"\bTECOM\b"),
+            ("DTC", "Dubai Taxi Company", r"Dubai Taxi"),
+            ("DFM", "Dubai Financial Market", r"Dubai Financial Market"),
+            ("SPINNEYS", "Spinneys", r"Spinneys"),
+            ("ALANSARI", "Al Ansari Financial Services", r"Al Ansari (?:Exchange|Financial)"),
+        ],
+    },
+    "ADX": {
+        "label": "Abu Dhabi Securities Exchange", "benchmark": None,
+        "disclosures": "https://www.adx.ae/en/issuers/issuers-information/listed-companies-disclosures",
+        "listings": [
+            ("FAB", "First Abu Dhabi Bank", r"First Abu Dhabi Bank"),
+            ("ADCB", "Abu Dhabi Commercial Bank", r"Abu Dhabi Commercial Bank|\bADCB\b"),
+            ("ADIB", "Abu Dhabi Islamic Bank", r"Abu Dhabi Islamic Bank|\bADIB\b"),
+            ("EAND", "e& (Etisalat)", r"(?<![\w&])e&(?![\w&])|Etisalat"),
+            ("ADNOCDIST", "ADNOC Distribution", r"ADNOC Distribution"),
+            ("ADNOCGAS", "ADNOC Gas", r"ADNOC Gas"),
+            ("ADNOCDRILL", "ADNOC Drilling", r"ADNOC Drilling"),
+            ("ADNOCLS", "ADNOC Logistics & Services", r"ADNOC Logistics"),
+            ("ADPORTS", "AD Ports Group", r"AD Ports|Abu Dhabi Ports"),
+            ("ALDAR", "Aldar Properties", r"\bAldar\b"),
+            ("IHC", "International Holding Company", r"International Holding Company"),
+            ("TAQA", "TAQA", r"\bTAQA\b"),
+            ("BOROUGE", "Borouge", r"Borouge"),
+            ("PUREHEALTH", "PureHealth", r"PureHealth|Pure Health"),
+            ("LULU", "Lulu Retail", r"Lulu (?:Hypermarket|Retail|Group)"),
+            ("MULTIPLY", "Multiply Group", r"Multiply Group"),
+            ("PRESIGHT", "Presight AI", r"Presight"),
+            ("SPACE42", "Space42 (Yahsat, Bayanat)", r"Space42|Yahsat|Bayanat"),
+            ("NMDC", "NMDC Group", r"\bNMDC\b"),
+            ("AGTHIA", "Agthia", r"Agthia"),
+            ("ALPHADHABI", "Alpha Dhabi", r"Alpha Dhabi"),
+            ("RAKBANK", "RAKBANK", r"RAKBANK|RAK Bank"),
+            ("ADNIC", "Abu Dhabi National Insurance", r"\bADNIC\b"),
+            ("DANA", "Dana Gas", r"Dana Gas"),
+            ("FERTIGLB", "Fertiglobe", r"Fertiglobe"),
+        ],
+    },
+}
+US_BENCHMARK = (MARKET, "S&P 500")
+
+
+def synthetic_cik(exchange, ticker):
+    """Non-US companies have no SEC number, so they get a stable negative one."""
+    return -(zlib.crc32(f"{exchange}:{ticker}".encode()) & 0x7FFFFFFF) - 1
+
+
+_INTERNATIONAL = [
+    (synthetic_cik(ex, ticker), ex, ticker, name, re.compile(pattern))
+    for ex, cfg in INTERNATIONAL.items() for ticker, name, pattern in cfg["listings"]
+]
+
+
+def ensure_international(conn):
+    conn.executemany(
+        """INSERT INTO companies (cik, ticker, name, exchange) VALUES (?, ?, ?, ?)
+           ON CONFLICT(cik) DO UPDATE SET ticker = excluded.ticker, name = excluded.name, exchange = excluded.exchange""",
+        [(cik, ticker, name, ex) for cik, ex, ticker, name, _ in _INTERNATIONAL],
+    )
+    conn.commit()
+
+
+def display_ticker(ticker):
+    return ticker[:-4] if ticker.endswith(".LON") else ticker
+
+
 # The name shown for a ticker: the first alias listed for it ("UnitedHealth", not "Optum").
 DISPLAY = {}
 for _alias, _ticker in ALIASES.items():
@@ -151,7 +295,7 @@ def _victim_patterns(name):
     return [
         rf"\b{c}{possessive}\s+{_SAYS}\s+(?:[^\s]+\s+){{0,6}}?{_INCIDENT}\b",
         rf"\b{c}{possessive}\s+{_HIT}\b",
-        rf"\b{c}{possessive}\s+{_ASSETS}\s+(?:[^\s]+\s+){{0,4}}?{_INCIDENT}\b",
+        rf"\b{c}{possessive}\s+{_ASSETS}['’]?\s+(?:[^\s]+\s+){{0,4}}?{_INCIDENT}\b",
         rf"\b(?i:breach|hack|cyber ?attack|attack|ransomware attack|intrusion|outage|incident)\s+(?i:at|on|of|against|hits?)\s+(?i:the\s+)?{c}\b",
         rf"\b{_ATTACKERS}\s+{_ATTACKER_VERBS}\s+(?i:the\s+)?{c}\b",
     ]
@@ -231,14 +375,15 @@ def refresh_companies(conn, contact):
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS listed (cik INTEGER PRIMARY KEY)")
     conn.execute("DELETE FROM listed")
     conn.executemany("INSERT INTO listed (cik) VALUES (?)", [(c,) for c in seen])
-    conn.execute("DELETE FROM companies WHERE cik NOT IN (SELECT cik FROM listed)")
+    conn.execute("DELETE FROM companies WHERE cik > 0 AND cik NOT IN (SELECT cik FROM listed)")
     _mark_looked_up(conn, "companies", "with-exchange")
     return f"{len(rows)} companies"
 
 
 def fetch_prices(conn, ticker, key):
     """Last ~100 trading days of closes. Returns None, or an error message."""
-    symbol = ticker.replace("-", ".")   # SEC writes BRK-B, Alpha Vantage BRK.B
+    # SEC writes BRK-B, Alpha Vantage BRK.B. London symbols are already Alpha Vantage's.
+    symbol = ticker if ticker.endswith(".LON") else ticker.replace("-", ".")
     resp = requests.get(AV_URL, params={"function": "TIME_SERIES_DAILY", "symbol": symbol,
                                         "outputsize": "compact", "apikey": key}, timeout=20)
     resp.raise_for_status()
@@ -305,7 +450,7 @@ def load_names(conn):
     """lowercased name -> (cik, ticker, display name)."""
     by_ticker = {}
     names = {}
-    for row in conn.execute("SELECT cik, ticker, name FROM companies"):
+    for row in conn.execute("SELECT cik, ticker, name FROM companies WHERE cik > 0"):
         display = short_name(row["name"])
         by_ticker[row["ticker"]] = (row["cik"], row["ticker"], display)
         key = display.lower()
@@ -323,7 +468,22 @@ _WORD_RE = re.compile(r"[A-Za-z0-9][\w&'’.\-]*")
 
 
 def victims(title, names):
-    """US-listed companies a headline names as the victim: [(cik, ticker, name, matched)]."""
+    """Listed companies a headline names as the victim: [(cik, ticker, name, matched)].
+    London, Dubai and Abu Dhabi names are checked first, so a UK company that also has
+    US-traded shares (BP, HSBC, Vodafone) is shown against its home market."""
+    found, taken = {}, set()
+    for cik, _, ticker, name, regex in _INTERNATIONAL:
+        for m in regex.finditer(title):
+            if any(re.search(p, title) for p in _victim_patterns(m.group(0))):
+                found.setdefault(cik, (cik, ticker, name, m.group(0)))
+                taken.add(m.group(0).lower())
+                taken.add(name.lower())
+                break
+    us = _us_victims(title, names, taken)
+    return list(found.values()) + [v for v in us if v[0] not in found]
+
+
+def _us_victims(title, names, taken):
     words = []
     for m in _WORD_RE.finditer(title):
         word = m.group(0).rstrip(".,'’")
@@ -336,7 +496,7 @@ def victims(title, names):
                 continue
             phrase = " ".join(words[i:i + size])
             hit = names.get(phrase.lower())
-            if not hit or not phrase[0].isupper():
+            if not hit or not phrase[0].isupper() or phrase.lower() in taken:
                 continue
             if not any(re.search(p, title) for p in _victim_patterns(phrase)):
                 continue
@@ -365,17 +525,20 @@ def find_events(conn):
 
 def _update_breaches(conn, contact, log):
     """Companies, breach mentions and SEC filings. Returns the breached companies,
-    newest story first."""
-    try:
-        log(f"Stocks: SEC company list {refresh_companies(conn, contact)}")
-    except (requests.RequestException, ValueError, KeyError) as e:
-        log(f"Stocks: couldn't fetch the SEC company list ({e.__class__.__name__}); trying next run")
-        if not conn.execute("SELECT 1 FROM companies LIMIT 1").fetchone():
-            return []
-    log(f"Stocks: {find_events(conn)} breach mentions of US-listed companies")
+    newest story first. Without an SEC contact only London, Dubai and Abu Dhabi
+    companies can be spotted."""
+    ensure_international(conn)
+    if contact:
+        try:
+            log(f"Stocks: SEC company list {refresh_companies(conn, contact)}")
+        except (requests.RequestException, ValueError, KeyError) as e:
+            log(f"Stocks: couldn't fetch the SEC company list ({e.__class__.__name__}); trying next run")
+    else:
+        log("Stocks: no .sec_contact, so only London, Dubai and Abu Dhabi companies are tracked (see README)")
+    log(f"Stocks: {find_events(conn)} breach mentions of listed companies")
 
     recent = conn.execute(
-        """SELECT c.cik, c.ticker,
+        """SELECT c.cik, c.ticker, c.exchange,
                   MAX(i.published) AS latest,
                   (SELECT COUNT(*) FROM prices p WHERE p.ticker = c.ticker) AS have
            FROM stock_events e JOIN items i ON i.id = e.item_id JOIN companies c ON c.cik = e.cik
@@ -384,7 +547,7 @@ def _update_breaches(conn, contact, log):
 
     sec_done = 0
     for row in recent:
-        if sec_done >= SEC_PER_RUN or _looked_up_today(conn, "sec", row["cik"]):
+        if not contact or row["cik"] < 0 or sec_done >= SEC_PER_RUN or _looked_up_today(conn, "sec", row["cik"]):
             continue
         try:
             fetch_filings(conn, row["cik"], contact)
@@ -395,14 +558,17 @@ def _update_breaches(conn, contact, log):
     return recent
 
 
+def benchmark_for(exchange):
+    """(ticker, name) of the market to compare with, or None when there are no prices."""
+    if exchange in INTERNATIONAL:
+        return INTERNATIONAL[exchange]["benchmark"]
+    return US_BENCHMARK
+
+
 def update(conn, log=print):
     """One collector step. Never raises: a failed lookup is retried next run."""
     contact, key = sec_contact(), av_key()
-    recent = []
-    if contact:
-        recent = _update_breaches(conn, contact, log)
-    else:
-        log("Stocks: breach tracking off. Add a contact to .sec_contact to turn on (see README).")
+    recent = _update_breaches(conn, contact, log)
 
     if not key:
         log("Stocks: no Alpha Vantage key in .alphavantage_key, so no prices")
@@ -415,7 +581,10 @@ def update(conn, log=print):
     # first, then the vendor watch.
     follow_from = (datetime.now(timezone.utc) - timedelta(days=FOLLOW_DAYS)).isoformat()
     wanted = [MARKET]
-    wanted += [r["ticker"] for r in recent if r["latest"] >= follow_from or not r["have"]]
+    for r in recent:
+        bench = benchmark_for(r["exchange"])
+        if bench and (r["latest"] >= follow_from or not r["have"]):
+            wanted += [bench[0], r["ticker"]]      # a London company also needs the FTSE 100
     wanted += [ticker for ticker, _, _ in WATCHLIST] + [SECTOR[0]]
     used_today = conn.execute(
         "SELECT COUNT(*) FROM lookups WHERE kind = 'prices' AND day = ?", (_today(),)
@@ -467,9 +636,15 @@ def incidents(conn):
                 g["stories"].append(dict(row))
                 break
         else:
-            grouped.append({"cik": row["cik"], "ticker": row["ticker"],
-                            "otc": row["exchange"] == "OTC", "foreign": bool(row["foreign_filer"]),
-                            "company": DISPLAY.get(row["ticker"]) or short_name(row["name"]),
+            exchange = row["exchange"]
+            intl = INTERNATIONAL.get(exchange)
+            grouped.append({"cik": row["cik"], "ticker": row["ticker"], "display_ticker": display_ticker(row["ticker"]),
+                            "exchange": exchange, "exchange_label": intl["label"] if intl else exchange,
+                            "otc": exchange == "OTC", "foreign": bool(row["foreign_filer"]),
+                            "us": row["cik"] > 0,
+                            "currency": intl.get("currency", "USD") if intl else "USD",
+                            "disclosures": intl.get("disclosures") if intl else None,
+                            "company": (row["name"] if intl else DISPLAY.get(row["ticker"]) or short_name(row["name"])),
                             "_first": published, "stories": [dict(row)]})
 
     for g in grouped:
@@ -477,7 +652,11 @@ def incidents(conn):
         g["date"] = story_day.isoformat()
         start = (story_day - timedelta(days=TRADING_DAYS * 2 + 6)).isoformat()
         end = (story_day + timedelta(days=TRADING_DAYS * 2 + 6)).isoformat()
-        stock, market = _series(conn, g["ticker"], start, end), _series(conn, MARKET, start, end)
+        bench = benchmark_for(g["exchange"])
+        g["no_prices"] = bench is None          # Dubai and Abu Dhabi: no free price source
+        g["market_name"] = bench[1] if bench else None
+        stock = _series(conn, g["ticker"], start, end) if bench else {}
+        market = _series(conn, bench[0], start, end) if bench else {}
         days = sorted(set(stock) & set(market))
         before = [d for d in days if d < g["date"]][-(TRADING_DAYS + 1):]
         after = [d for d in days if d >= g["date"]][:TRADING_DAYS]
@@ -576,10 +755,12 @@ def main():
     for g in found:
         s = g["stories"][0]
         notes = [n for n, on in (("over the counter", g["otc"]), ("foreign filer", g["foreign"])) if on]
-        print(f"{g['date']}  {g['company']} ({g['ticker']}{', ' + ', '.join(notes) if notes else ''})  "
-              f"[{s['source']}] {s['title']}")
-        if g["change"] is not None:
-            print(f"    {g['change']:+.1%} through {g['through']}, S&P 500 {g['market_change']:+.1%}")
+        print(f"{g['date']}  {g['company']} ({g['exchange'] or 'US'}: {g['display_ticker']}"
+              f"{', ' + ', '.join(notes) if notes else ''})  [{s['source']}] {s['title']}")
+        if g["no_prices"]:
+            print(f"    no free price source for {g['exchange_label']}")
+        elif g["change"] is not None:
+            print(f"    {g['change']:+.1%} through {g['through']}, {g['market_name']} {g['market_change']:+.1%}")
         else:
             print("    no price data around the story yet")
         for f in g["filings"]:

@@ -274,11 +274,13 @@
     if (item.stock) {
       const s = item.stock;
       const pct = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
-      stock.append("Stock: " + s.company + " (" + s.ticker + ") ");
-      if (s.change !== null) {
+      stock.append("Stock: " + s.company + " (" + (s.us ? "" : s.exchange + ": ") + s.display_ticker + ") ");
+      if (s.no_prices) {
+        stock.append("no free price data for " + s.exchange);
+      } else if (s.change !== null) {
         const strong = document.createElement("strong");
         strong.textContent = pct(s.change);
-        stock.append(strong, " since the story · S&P 500 " + pct(s.market_change));
+        stock.append(strong, " since the story · " + s.market_name + " " + pct(s.market_change));
       } else {
         stock.append("price data pending");
       }

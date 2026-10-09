@@ -144,7 +144,7 @@
 
     <section class="section" id="victims" aria-labelledby="victims-title">
     <h2 class="section-title" id="victims-title">Breach victims</h2>
-    <p class="lede">US-listed companies named as breach victims in the last {{ lookback }} days. Each chart starts at the last closing price before the story (0%) and compares the share price with the S&amp;P 500 over the same days. Prices move for many reasons, so this shows what happened around the story, not what caused it.</p>
+    <p class="lede">Listed companies named as breach victims in the last {{ lookback }} days: in the US, London, Dubai and Abu Dhabi. Each chart starts at the last closing price before the story (0%) and compares the share price with its home market (the S&amp;P 500 or the FTSE 100) over the same days. Prices move for many reasons, so this shows what happened around the story, not what caused it.</p>
     {% if incidents %}
       <div class="cards">
         {% for inc in incidents %}
@@ -152,7 +152,7 @@
           <article class="card" aria-labelledby="co-{{ loop.index }}">
             <div class="card-head">
               <h2 id="co-{{ loop.index }}">{{ inc.company }}</h2>
-              <span class="ticker">{{ inc.ticker }}</span>
+              <span class="ticker">{% if not inc.us %}{{ inc.exchange }}: {% endif %}{{ inc.display_ticker }}</span>
               {% if inc.otc %}<span class="otc" title="Traded over the counter, outside the main exchanges: often a foreign company's US shares, with less trading">over the counter</span>{% endif %}
               <span class="date">story {{ inc.date }}</span>
             </div>
@@ -169,7 +169,9 @@
                 <span class="change">{{ "%+.1f" | format(inc.change * 100) }}%</span>
                 <span class="change-label">since the story, through {{ inc.through }}</span>
               </div>
-              <p class="market">S&amp;P 500 {{ "%+.1f" | format(inc.market_change * 100) }}% over the same days, so {{ "%.1f" | format(diff | abs) }} points {{ "better" if diff >= 0 else "worse" }} than the market.</p>
+              <p class="market">{{ inc.market_name }} {{ "%+.1f" | format(inc.market_change * 100) }}% over the same days, so {{ "%.1f" | format(diff | abs) }} points {{ "better" if diff >= 0 else "worse" }} than the market.</p>
+            {% elif inc.no_prices %}
+              <p class="pending">No free price source covers the {{ inc.exchange_label }}, so there's no chart. A paid market-data feed could add one later.</p>
             {% elif not has_prices_key %}
               <p class="pending">No price data: needs an Alpha Vantage key.</p>
             {% elif inc.base_day %}
@@ -180,21 +182,21 @@
 
             {% if inc.points | length > 1 %}
               <ul class="legend" aria-hidden="true">
-                <li><span class="key"></span>{{ inc.ticker }}</li>
-                <li><span class="key market-key"></span>S&amp;P 500 (SPY)</li>
+                <li><span class="key"></span>{{ inc.display_ticker }}</li>
+                <li><span class="key market-key"></span>{{ inc.market_name }}</li>
               </ul>
               <div class="chart" data-kind="incident" data-index="{{ loop.index0 }}" tabindex="0" role="img"
-                   aria-label="{{ inc.company }} share price compared with the S&amp;P 500 around the story. Use the left and right arrow keys to read each day."></div>
+                   aria-label="{{ inc.company }} share price compared with the {{ inc.market_name }} around the story. Use the left and right arrow keys to read each day."></div>
               <details>
                 <summary>Daily prices</summary>
                 <table>
-                  <thead><tr><th scope="col">Day</th><th scope="col">{{ inc.ticker }} close</th><th scope="col">{{ inc.ticker }}</th><th scope="col">S&amp;P 500</th></tr></thead>
+                  <thead><tr><th scope="col">Day</th><th scope="col">{{ inc.display_ticker }} close</th><th scope="col">{{ inc.display_ticker }}</th><th scope="col">{{ inc.market_name }}</th></tr></thead>
                   <tbody>
                     {% set base = (inc.points | selectattr("day", "equalto", inc.base_day) | first) if inc.base_day else inc.points[0] %}
                     {% for p in inc.points %}
                       <tr{% if p.day == inc.base_day %} class="story-row"{% endif %}>
                         <td>{{ p.day }}{% if p.day == inc.base_day %} (before story){% endif %}</td>
-                        <td>${{ "%.2f" | format(p.close) }}</td>
+                        <td>{% if inc.currency == "GBX" %}{{ "%.2f" | format(p.close) }}p{% else %}${{ "%.2f" | format(p.close) }}{% endif %}</td>
                         <td>{{ "%+.1f" | format((p.close / base.close - 1) * 100) }}%</td>
                         <td>{{ "%+.1f" | format((p.market / base.market - 1) * 100) }}%</td>
                       </tr>
@@ -205,6 +207,14 @@
             {% endif %}
 
             <p class="sec">
+              {% if inc.disclosures %}
+              <span class="label">Disclosures</span>
+                <a href="{{ inc.disclosures }}" target="_blank" rel="noopener noreferrer">{{ inc.exchange }} company announcements ↗</a>
+                <span class="muted">UAE-listed companies must announce material events to their exchange. There's no rule naming cyber incidents specifically, so a breach may not appear.</span>
+              {% elif inc.exchange == "LSE" %}
+              <span class="label">Disclosures</span>
+                <span class="muted">UK-listed companies announce material incidents through the London Stock Exchange's news service (RNS).</span>
+              {% else %}
               <span class="label">SEC</span>
               {% if inc.filings %}
                 {% for f in inc.filings %}
@@ -217,6 +227,7 @@
                 <span class="muted">No Item 1.05 breach filing within 30 days before or 60 days after the story.</span>
               {% else %}
                 <span class="muted">Not checked yet.</span>
+              {% endif %}
               {% endif %}
             </p>
           </article>
@@ -413,8 +424,8 @@
       head.textContent = r.day + (cfg.storyMarker && i === cfg.baseIndex ? " · last close before story" : "");
       const parts = [
         head,
-        line(pct(r.s), cfg.ticker + " ($" + r.close.toFixed(2) + ")", "key"),
-        line(pct(r.m), "S&P 500", "key market-key"),
+        line(pct(r.s), cfg.ticker + " (" + (cfg.currency === "GBX" ? r.close.toFixed(2) + "p" : "$" + r.close.toFixed(2)) + ")", "key"),
+        line(pct(r.m), cfg.marketName || "S&P 500", "key market-key"),
       ];
       for (const m of marksByDay[r.day] || []) {
         const t = document.createElement("div");
@@ -460,7 +471,8 @@
     } else {
       const inc = INCIDENTS[i];
       const baseIndex = Math.max(0, inc.points.findIndex((p) => p.day === inc.base_day));
-      draw(box, { points: inc.points, baseIndex, ticker: inc.ticker, storyMarker: true });
+      draw(box, { points: inc.points, baseIndex, ticker: inc.display_ticker, storyMarker: true,
+                  marketName: inc.market_name, currency: inc.currency });
     }
   });
 })();

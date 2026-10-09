@@ -19,7 +19,7 @@ The same story from several outlets is shown once, with the other outlets listed
 ```
 RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> browser
                │
-               ├─ fetch.py    download and normalise 9 feeds
+               ├─ fetch.py    download and normalise 12 feeds
                ├─ enrich.py   pull CVE IDs, look up CVSS and CISA KEV status in NVD
                └─ score.py    assign a colour and record why
 
@@ -29,7 +29,8 @@ app.py ──> dedupe.py   group the same story from different outlets
 collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
 ```
 
-- **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review. The list lives in `feeds.py`.
+- **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review, and three Gulf sources: The National (technology), Tahawultech and Security Middle East. The list lives in `feeds.py`.
+- **Gulf sources are filtered.** They mix cybersecurity with general tech, vendor and physical-security news (locks, CCTV), so feeds marked `cyber-only` keep only items whose title, summary or tags look like cybersecurity. Plain "security" isn't enough to pass. Gulf News, Khaleej Times and Arab News only offer general news feeds (around 200 items a day), so they aren't used.
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
 
@@ -90,7 +91,20 @@ The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (pu
 
 ## Stock impact
 
-`/stocks` follows US-listed companies named as breach victims over the last 90 days:
+`/stocks` follows listed companies named as breach victims over the last 90 days, on four markets:
+
+| Market | Companies | Prices | Compared with | Official breach disclosure |
+|---|---|---|---|---|
+| US (NYSE, Nasdaq, OTC) | every SEC-registered company | Alpha Vantage | S&P 500 (SPY) | SEC 8-K Item 1.05, checked and linked |
+| London (LSE) | ~50 hand-picked: the biggest and most-breached names | Alpha Vantage (`.LON`, in pence) | FTSE 100 (ISF fund) | RNS announcements (not checked) |
+| Dubai (DFM) | ~20 hand-picked large companies | none free: card without a chart | – | link to DFM disclosures |
+| Abu Dhabi (ADX) | ~25 hand-picked large companies | none free: card without a chart | – | link to ADX disclosures |
+
+London, Dubai and Abu Dhabi names are checked first, so a UK company with US-traded shares (BP, HSBC, Vodafone) is shown against its home market. They don't need an SEC contact.
+
+**Why Dubai and Abu Dhabi have no charts:** no free source covers them. Alpha Vantage doesn't; Twelve Data only on paid plans; TradingView and Investing.com have no public API and their terms forbid automated collection; ADX's terms forbid scraping its site; and DFM only offers manual downloads. ADX launched an official data service in August 2026 with a free tier (100 lookups a month), the most promising way to add ADX prices once its licence is checked. UAE rules require listed companies to announce *material* events, but unlike the SEC there's no rule naming cyber incidents, so a breach may never be announced.
+
+For the US:
 
 - **The share price around the story,** as a chart starting at the last close before the story (0%), next to the S&P 500 over the same days. The headline number is the change since the story, plus how far ahead of or behind the market it is. Prices move for many reasons, so the page shows what happened around the story, never that the breach caused it.
 - **The company's own breach filing.** Since December 2023, US-listed companies must file an 8-K under Item 1.05 within four business days of deciding a cyber incident is material. If one was filed within 30 days before or 60 days after the story, the card links straight to it on the SEC's site.
@@ -186,11 +200,11 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
 - Event rate limits use the visitor's IP. Behind a proxy (Vercel, later) every visitor shares the proxy's address, so the real IP has to be read from the proxy's header first.
-- Stock impact covers US-listed companies only, and only spots a victim named in the headline. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
+- Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
 
-- Stock impact for companies on other exchanges, such as Dubai (DFM), Abu Dhabi (ADX) and London (LSE). Each needs its own list of listed companies, a price source that covers it, and handling for different currencies and trading days.
+- Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the Pi's command line.
 - A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
