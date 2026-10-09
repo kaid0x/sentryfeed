@@ -101,6 +101,14 @@ The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (pu
 
 **Data and limits.** The collector checks each company's SEC filings and Alpha Vantage prices at most once a day: the S&P 500 first, then breach victims (newest story first), then the vendor watch, which takes 10 lookups. It stops at 20 price lookups a day (the free key allows 25), and for the rest of the day if Alpha Vantage says the limit is reached. `python stocks.py` runs an update by hand and prints every incident and the vendor watch.
 
+## My stack
+
+`/stack` lets an IT team tick the products their company runs (about 60, from FortiGate and NetScaler to Exchange, VMware, MOVEit and WordPress) and see only the stories about them from the last 14 days. The feed gets a "My stack" button that filters to the same stories, and it combines with the severity tiles.
+
+**The choices never leave the browser.** They're kept in the browser's local storage. The server only tags each story with the products it mentions (`stack.py`), and the page does the filtering, so SentryFeed never learns what anyone runs. That matters, because a list of a company's products is exactly what an attacker would want.
+
+Matching is case-sensitive on product names, nicknames and parts ("CitrixBleed" is NetScaler, "PAN-OS" is Palo Alto, "Atlassian flaw" counts for Confluence and Jira). Faked brands ("fake Cloudflare checks") and research teams ("Cisco Talos finds…") don't count, and tech news and events aren't tagged. Run `python stack.py` to see which stories match which products.
+
 ## Events
 
 `/events` lists cybersecurity events (CTFs, webinars, conferences, meetups, workshops) submitted through `/events/submit` by the people running them. Events starting in the next two weeks also appear under the feed's blue Events tile.

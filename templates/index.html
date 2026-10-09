@@ -5,6 +5,14 @@
 <style nonce="{{ csp_nonce }}">
   .updated { font: 12px var(--mono); color: var(--muted); }
   .windows { margin-left: auto; display: flex; gap: 4px; }
+  .stack-toggle, .stack-setup {
+    font: 12px var(--mono); color: var(--muted); background: none; text-decoration: none; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 4px; padding: 3px 9px;
+  }
+  .stack-toggle:hover, .stack-setup:hover { color: var(--text); border-color: var(--muted); }
+  .stack-toggle[aria-pressed="true"] { color: var(--bg); background: var(--blue); border-color: var(--blue); }
+  .stack-empty { padding: 28px 18px; color: var(--muted); font-size: 14px; }
+  .stack-empty a { color: var(--text); }
   .windows a {
     font: 12px var(--mono);
     color: var(--muted);
@@ -150,6 +158,8 @@
 
 {% block header_extra %}
   <span class="updated">{% if updated %}updated {{ updated }}{% else %}no data yet{% endif %}{% if kev_count %} · {{ kev_count }} actively exploited{% endif %}</span>
+  <button class="stack-toggle" id="stack-toggle" type="button" aria-pressed="false" hidden>My stack</button>
+  <a class="stack-setup" id="stack-setup" href="/stack" hidden>Set up My stack</a>
   <nav class="windows" aria-label="Time window">
     {% for d, label in windows %}
       <a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>
@@ -172,7 +182,7 @@
   {% if items %}
     <ul class="feed" id="feed">
       {% for item in items %}
-        <li data-sev="{{ item.severity }}">
+        <li data-sev="{{ item.severity }}" data-products="{{ item.products | join(' ') }}">
           <button class="item sev-{{ item.severity }}" data-index="{{ loop.index0 }}"{% if loop.first %} aria-current="true"{% endif %}>
             <span class="title">{{ item.title }}</span>
             <span class="meta">
@@ -185,6 +195,7 @@
           </button>
         </li>
       {% endfor %}
+      <li class="stack-empty" id="stack-empty" hidden>Nothing about your stack in this time window. Try a longer window, or <a href="/stack">change My stack</a>.</li>
     </ul>
     <section class="detail" id="detail" aria-live="polite">
       <div class="detail-inner">
@@ -337,7 +348,27 @@
     show(0);
   }
 
-  // Tiles filter the list; clicking the active tile again clears the filter.
+  // Two filters that combine: a severity tile, and My stack (the products picked on
+  // /stack, which are kept only in this browser).
+  let sevFilter = null, stackOn = false;
+  const stack = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]")); }
+    catch (e) { return new Set(); }
+  })();
+  const inStack = (li) => (li.dataset.products || "").split(" ").some((p) => p && stack.has(p));
+
+  function applyFilters() {
+    let first = null;
+    document.querySelectorAll("#feed li[data-sev]").forEach((li) => {
+      const visible = (!sevFilter || li.dataset.sev === sevFilter) && (!stackOn || inStack(li));
+      li.hidden = !visible;
+      if (visible && first === null) first = li.querySelector(".item").dataset.index;
+    });
+    const empty = $("stack-empty");
+    if (empty) empty.hidden = !(stackOn && first === null);
+    if (first !== null) show(Number(first));
+  }
+
   const tiles = $("tiles");
   tiles.addEventListener("click", (e) => {
     const tile = e.target.closest(".tile");
@@ -346,15 +377,26 @@
     tiles.querySelectorAll(".tile").forEach((t) => t.setAttribute("aria-pressed", "false"));
     tile.setAttribute("aria-pressed", String(turningOn));
     tiles.classList.toggle("filtering", turningOn);
-
-    const sev = turningOn ? tile.dataset.sev : null;
-    let first = null;
-    document.querySelectorAll("#feed li").forEach((li) => {
-      const visible = !sev || li.dataset.sev === sev;
-      li.hidden = !visible;
-      if (visible && first === null) first = li.querySelector(".item").dataset.index;
-    });
-    if (first !== null) show(Number(first));
+    sevFilter = turningOn ? tile.dataset.sev : null;
+    applyFilters();
   });
+
+  const toggle = $("stack-toggle");
+  if (stack.size) {
+    const matching = [...document.querySelectorAll("#feed li[data-sev]")].filter(inStack).length;
+    toggle.textContent = "My stack · " + matching;
+    toggle.hidden = false;
+    try { stackOn = localStorage.getItem("sentryfeed.stackOn") === "1"; } catch (e) { /* stays off */ }
+    toggle.setAttribute("aria-pressed", String(stackOn));
+    toggle.addEventListener("click", () => {
+      stackOn = !stackOn;
+      toggle.setAttribute("aria-pressed", String(stackOn));
+      try { localStorage.setItem("sentryfeed.stackOn", stackOn ? "1" : "0"); } catch (e) { /* fine */ }
+      applyFilters();
+    });
+    if (stackOn) applyFilters();
+  } else {
+    $("stack-setup").hidden = false;
+  }
 </script>
 {% endblock %}

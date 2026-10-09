@@ -199,7 +199,7 @@ def as_feed_items(events):
         "source": e["organiser"], "summary": e["description"] or "", "link": e["url"],
         "published": None, "age": e["when"], "cves": [], "kev": 0,
         "severity_reason": f"{e['kind_label']} · {e['where']} · {e['starts_display']}",
-        "where": [], "blamed": [], "also": [], "event": True,
+        "where": [], "blamed": [], "products": [], "also": [], "event": True,
     } for e in events]
 
 

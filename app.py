@@ -15,6 +15,7 @@ from db import DB_PATH, connect
 from dedupe import group_stories
 from geo import NAMES as COUNTRY_NAMES, locate
 import events
+import stack
 import stocks
 
 SECRET_FILE = Path(__file__).with_name(".flask_secret")
@@ -123,12 +124,15 @@ def load_items(days):
         members = [story, *others]
         story["cves"] = sorted(set(story["cves"]).union(*(m["cves"] for m in others)))
         story["kev"] = int(any(m["kev"] for m in members))
-        where, blamed = set(), set()
+        where, blamed, products = set(), set(), set()
         for m in members:
             w, b = locate(m)
             where.update(w)
             blamed.update(b)
+            if story["severity"] in stack.SECURITY_SEVERITIES:
+                products.update(stack.match(m))
         story["where"], story["blamed"] = sorted(where), sorted(blamed)
+        story["products"] = sorted(products)
         story["also"] = [{k: m.get(k) for k in ALSO_FIELDS} for m in others]
     return stories
 
@@ -268,6 +272,23 @@ def world_map():
         windows=WINDOWS,
         days=days,
         updated=last_updated(),
+    )
+
+
+STACK_DAYS = 14
+STACK_FIELDS = ("title", "link", "source", "age", "severity", "severity_reason", "kev", "products")
+
+
+@app.route("/stack")
+def my_stack():
+    stories = [s for s in load_items(STACK_DAYS) if s["products"]]
+    return render_template(
+        "stack.html",
+        catalog=stack.catalog(),
+        names=stack.NAMES,
+        stories=[{**{k: s[k] for k in STACK_FIELDS}, "sources": 1 + len(s["also"])} for s in stories],
+        days=STACK_DAYS,
+        severities=SEVERITIES,
     )
 
 

@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% set active = "stack" %}
+
+{% block title %}My stack · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .page { flex: 1; overflow-y: auto; padding: 28px 20px 48px; }
+  .page-inner { max-width: 1180px; margin: 0 auto; }
+  .page h1 { font-size: 24px; margin: 0 0 8px; font-weight: 600; }
+  .lede { color: #c5cad1; margin: 0 0 22px; max-width: 760px; }
+  .lede strong { color: var(--text); }
+  .layout { display: grid; grid-template-columns: minmax(300px, 400px) 1fr; gap: 24px; align-items: start; }
+
+  .picker { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; }
+  .picker-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 0 0 10px; }
+  .picker h2, .results h2 { font-size: 16px; margin: 0; font-weight: 600; }
+  .picked { font: 12px var(--mono); color: var(--muted); }
+  .search {
+    width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; font: 14px var(--sans); margin: 0 0 12px;
+  }
+  .search:focus { outline: none; border-color: var(--muted); }
+  .group { margin: 0 0 12px; }
+  .group h3 { font: 11.5px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 6px; font-weight: 400; }
+  .group ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .group label { display: flex; align-items: center; gap: 9px; padding: 5px 6px; border-radius: 5px; cursor: pointer; font-size: 14px; }
+  .group label:hover { background: var(--panel-hover); }
+  .group input { accent-color: var(--blue); width: 16px; height: 16px; flex: none; }
+  .picker-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding-top: 10px; margin-top: 4px; }
+  .link-btn { background: none; border: 0; padding: 0; color: var(--muted); font: 12.5px var(--mono); cursor: pointer; text-decoration: underline; }
+  .link-btn:hover { color: var(--text); }
+  .privacy { font-size: 12.5px; color: var(--muted); margin: 0; }
+  .warn { font-size: 12.5px; color: var(--yellow); margin: 8px 0 0; }
+
+  .results-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin: 0 0 12px; }
+  .summary-line { font: 12.5px var(--mono); color: var(--muted); }
+  .summary-line strong { color: var(--text); font-weight: 600; }
+  .stories { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .story { border: 1px solid var(--line); border-left: 3px solid var(--sev); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+  .story a.title { text-decoration: none; font-size: 15px; line-height: 1.4; display: block; }
+  .story a.title:hover { text-decoration: underline; }
+  .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font: 11.5px var(--mono); color: var(--muted); }
+  .sev-tag { color: var(--sev); text-transform: uppercase; letter-spacing: 0.05em; }
+  .kev-tag { color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 0 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font: 11.5px var(--mono); color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; padding: 1px 8px; }
+  .why { font: 11.5px var(--mono); color: var(--muted); margin-top: 4px; }
+  .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 24px 18px; color: var(--muted); }
+  .empty strong { color: var(--text); }
+
+  @media (max-width: 860px) {
+    .page { padding: 22px 14px 40px; }
+    .layout { grid-template-columns: 1fr; }
+    .results { order: -1; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="page">
+  <div class="page-inner">
+    <h1>My stack</h1>
+    <p class="lede">Tick the products your company runs, and see only the stories about them: new flaws, attacks and anything CISA has confirmed is being exploited. <strong>Your choices stay in this browser.</strong> They're never sent to SentryFeed or anywhere else. The feed also gets a "My stack" filter.</p>
+
+    <div class="layout">
+      <section class="picker" aria-labelledby="picker-title">
+        <div class="picker-head">
+          <h2 id="picker-title">Products</h2>
+          <span class="picked" id="picked" aria-live="polite">none picked</span>
+        </div>
+        <label class="sr-only" for="search">Search products</label>
+        <input class="search" id="search" type="search" placeholder="Search, e.g. Fortinet" autocomplete="off">
+        <div id="groups">
+          {% for key, label, products in catalog %}
+            <div class="group" data-group="{{ key }}">
+              <h3>{{ label }}</h3>
+              <ul>
+                {% for pid, name in products %}
+                  <li data-name="{{ name | lower }}"><label><input type="checkbox" value="{{ pid }}"> {{ name }}</label></li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endfor %}
+        </div>
+        <div class="picker-foot">
+          <p class="privacy">Saved in this browser only.</p>
+          <button class="link-btn" id="clear" type="button">Clear all</button>
+        </div>
+        <p class="warn" id="no-storage" hidden>This browser isn't letting the page save your choices, so they'll reset when you leave.</p>
+      </section>
+
+      <section class="results" aria-labelledby="results-title">
+        <div class="results-head">
+          <h2 id="results-title">About your stack, last {{ days }} days</h2>
+          <span class="summary-line" id="summary" aria-live="polite"></span>
+        </div>
+        <ul class="stories" id="stories"></ul>
+        <p class="empty" id="empty-none">Pick the products your company runs on the left, and stories about them appear here. Nothing you pick leaves this browser.</p>
+        <p class="empty" id="empty-quiet" hidden><strong>Nothing about your stack in the last {{ days }} days.</strong> No new flaws or attacks reported for the products you picked.</p>
+        <noscript><p class="empty">My stack runs in your browser, so it needs JavaScript turned on.</p></noscript>
+      </section>
+    </div>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const STORIES = {{ stories | tojson }};
+  const NAMES = {{ names | tojson }};
+  const LABELS = {{ dict(severities) | tojson }};
+  const KEY = "sentryfeed.stack";
+  const $ = (id) => document.getElementById(id);
+
+  // Choices live in localStorage only. If the browser blocks it, the page still
+  // works for this visit and says so.
+  let canSave = true;
+  function load() {
+    try { return new Set(JSON.parse(localStorage.getItem(KEY) || "[]").filter((p) => p in NAMES)); }
+    catch (e) { canSave = false; return new Set(); }
+  }
+  function save(set) {
+    try { localStorage.setItem(KEY, JSON.stringify([...set])); }
+    catch (e) { canSave = false; }
+    $("no-storage").hidden = canSave;
+  }
+
+  const chosen = load();
+  $("no-storage").hidden = canSave;
+  const boxes = document.querySelectorAll('#groups input[type="checkbox"]');
+  boxes.forEach((box) => { box.checked = chosen.has(box.value); });
+
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+
+  function render() {
+    $("picked").textContent = chosen.size ? chosen.size + " picked" : "none picked";
+    const matches = STORIES.filter((s) => s.products.some((p) => chosen.has(p)));
+    const list = $("stories");
+    list.replaceChildren(...matches.map((s) => {
+      const li = el("li", "story sev-" + s.severity);
+      const a = el("a", "title", s.title + (s.link ? " ↗" : ""));
+      if (s.link) { a.href = s.link; a.target = "_blank"; a.rel = "noopener noreferrer"; }
+      const meta = el("div", "meta");
+      meta.append(el("span", "sev-tag", LABELS[s.severity]), el("span", "", s.source));
+      if (s.age) meta.append(el("span", "", s.age));
+      if (s.kev) meta.append(el("span", "kev-tag", "KEV"));
+      if (s.sources > 1) meta.append(el("span", "", "+" + (s.sources - 1) + (s.sources > 2 ? " sources" : " source")));
+      const chips = el("div", "chips");
+      s.products.filter((p) => chosen.has(p)).forEach((p) => chips.append(el("span", "chip", NAMES[p])));
+      li.append(a, meta, el("div", "why", s.severity_reason), chips);
+      return li;
+    }));
+    const exploited = matches.filter((s) => s.kev || s.severity === "red").length;
+    const summary = $("summary");
+    summary.replaceChildren();
+    if (chosen.size && matches.length) {
+      const n = el("strong", "", String(matches.length));
+      summary.append(n, matches.length === 1 ? " story" : " stories");
+      if (exploited) summary.append(" · ", el("strong", "", String(exploited)), " Major");
+    }
+    $("empty-none").hidden = chosen.size > 0;
+    $("empty-quiet").hidden = !(chosen.size > 0 && matches.length === 0);
+  }
+
+  $("groups").addEventListener("change", (e) => {
+    if (e.target.type !== "checkbox") return;
+    e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value);
+    save(chosen);
+    render();
+  });
+  $("clear").addEventListener("click", () => {
+    chosen.clear();
+    boxes.forEach((b) => { b.checked = false; });
+    save(chosen);
+    render();
+  });
+  $("search").addEventListener("input", (e) => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll("#groups .group").forEach((g) => {
+      let any = false;
+      g.querySelectorAll("li").forEach((li) => {
+        const show = !q || li.dataset.name.includes(q);
+        li.hidden = !show;
+        any = any || show;
+      });
+      g.hidden = !any;
+    });
+  });
+  render();
+})();
+</script>
+{% endblock %}
