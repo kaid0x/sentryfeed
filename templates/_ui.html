@@ -1,10 +1,10 @@
-{# Shared building blocks for the redesign prototypes. Import with context so csp_nonce is visible. #}
+{# Shared building blocks for every page. Import with context so csp_nonce is visible. #}
 
 {% macro head(title, fallback="dark") %}
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>{{ title }}</title>
+{% if title %}<title>{{ title }}</title>{% endif %}
 {# Runs before the page paints, so a saved theme never flashes the other one first.
    No saved choice: follow the device's setting, and use the fallback when it states none. #}
 <script nonce="{{ csp_nonce }}">
@@ -26,34 +26,33 @@
 {% endmacro %}
 
 {# Desktop: one dropdown per group. Phones: a single "Menu" button opening every group as a list.
-   Planned pages are named but not linked, so nothing in the menu leads nowhere. #}
-{% macro menus(nav, d) %}
+   Planned pages are named but not linked, so nothing in the menu leads nowhere.
+   nav is [(group, [(label, href or None, page key)])]; active is the current page's key. #}
+{% macro menu_links(links, active) %}
+  {% for label, href, key in links %}
+  {% if href %}<li><a href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a></li>
+  {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
+  {% endfor %}
+{% endmacro %}
+
+{% macro menus(nav, active) %}
 <nav class="menus" aria-label="Sections">
   <ul class="menus-row">
-    <li><a class="menu-home" href="/proto/{{ d }}">Home</a></li>
+    <li><a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a></li>
     {% for group, links in nav %}
+    {% set here = active in links | map(attribute=2) | list %}
     <li class="menu">
-      <button type="button" class="menu-button" aria-expanded="false" aria-controls="menu-{{ loop.index }}">{{ group }}</button>
-      <ul class="menu-panel" id="menu-{{ loop.index }}" hidden>
-        {% for label, href in links %}
-        {% if href %}<li><a href="{{ href }}">{{ label }}</a></li>
-        {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
-        {% endfor %}
-      </ul>
+      <button type="button" class="menu-button{{ ' here' if here }}" aria-expanded="false" aria-controls="menu-{{ loop.index }}">{{ group }}</button>
+      <ul class="menu-panel" id="menu-{{ loop.index }}" hidden>{{ menu_links(links, active) }}</ul>
     </li>
     {% endfor %}
   </ul>
   <button type="button" class="menu-mobile" aria-expanded="false" aria-controls="menu-all">Menu</button>
   <div class="menu-all" id="menu-all" hidden>
-    <a class="menu-home" href="/proto/{{ d }}">Home</a>
+    <a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a>
     {% for group, links in nav %}
     <h2 class="menu-all-group">{{ group }}</h2>
-    <ul>
-      {% for label, href in links %}
-      {% if href %}<li><a href="{{ href }}">{{ label }}</a></li>
-      {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
-      {% endfor %}
-    </ul>
+    <ul>{{ menu_links(links, active) }}</ul>
     {% endfor %}
   </div>
 </nav>
@@ -181,25 +180,6 @@
 </script>
 {% endmacro %}
 
-{# Hover or focus anything with data-readout and its text appears in the readout element,
-   so the charts work by keyboard as well as by mouse. #}
-{% macro readout_script() %}
-<script nonce="{{ csp_nonce }}">
-(function () {
-  document.querySelectorAll("[data-readout-for]").forEach((chart) => {
-    const out = document.getElementById(chart.getAttribute("data-readout-for"));
-    const resting = out.textContent;
-    chart.querySelectorAll("[data-readout]").forEach((mark) => {
-      const show = () => { out.textContent = mark.getAttribute("data-readout"); };
-      mark.addEventListener("mouseenter", show);
-      mark.addEventListener("focus", show);
-    });
-    chart.addEventListener("mouseleave", () => { if (!chart.contains(document.activeElement)) out.textContent = resting; });
-    chart.addEventListener("focusout", (e) => { if (!chart.contains(e.relatedTarget)) out.textContent = resting; });
-  });
-})();
-</script>
-{% endmacro %}
 
 {# Map fills for countries with stories, drawn server-side: one nonce'd rule per country. #}
 {% macro map_fills(scope, map) %}

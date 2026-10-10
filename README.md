@@ -1,8 +1,8 @@
 # SentryFeed
 
-A self-hosted threat-intel dashboard running on a Raspberry Pi 3B. Every 30 minutes it pulls security and tech news, looks up the CVEs each story mentions, checks whether CISA has confirmed they're being exploited, and colours every story by how much it matters.
+A self-hosted threat-intel site running on a Raspberry Pi 3B. Every 30 minutes it pulls security and tech news, looks up the CVEs each story mentions, checks whether CISA has confirmed they're being exploited, and colours every story by how much it matters. The front page reads like a newspaper: what matters today in one sentence, the most important stories, then sections for exploited flaws, the Gulf, markets and the week.
 
-![SentryFeed dashboard: severity tiles, the story list and a story's detail panel](docs/dashboard.png)
+![SentryFeed's front page: the day in one sentence, the lead story, and the next most important stories](docs/dashboard.png)
 
 | Colour | Meaning |
 |---|---|
@@ -14,6 +14,19 @@ A self-hosted threat-intel dashboard running on a Raspberry Pi 3B. Every 30 minu
 
 The same story from several outlets is shown once, with the other outlets listed under it.
 
+## Front page
+
+`/` answers "what matters right now?" in a few seconds. The full list of stories is at `/feed`, with a reading panel, severity filters and windows of 24 hours to 14 days (old links like `/?days=3` redirect there).
+
+- **The day in one sentence:** Major stories, stories about flaws on CISA's exploited list, and breached listed companies, all in the last 24 hours.
+- **Top stories:** the five most important from the last 24 hours, ranked by severity, then CISA listing, then how many outlets covered them. The first leads with its summary. Microsoft publishes one advisory per flaw, often dozens a day, so they're grouped into a single item ("Microsoft: 33 security advisories in the last 24 hours") with the most serious listed.
+- **Your stack:** if you've picked products on `/stack`, a strip shows recent stories about them. The list stays in your browser, as on the My stack page.
+- **Being exploited now:** the week's stories about flaws on CISA's list, or that say a flaw is already being used.
+- **In the Gulf:** stories from the regional sources and any story naming a GCC country, with a map of the Gulf. The regional feeds carry a lot of vendor announcements, so their stories only appear when they're serious or about an incident, a flaw or the authorities, and the section says how many it left out.
+- **Markets**, **Where it happened** (a small map leading to `/map`), **Coming up** (approved events) and the planned weekly digest.
+
+Severity reasons are written in plain words across the site: "Remote code execution" rather than `mentions 'rce'`, "Rated 9.8 out of 10" rather than `CVSS 9.8`. `score.py` keeps its exact wording for debugging the rules; `briefing.py` translates it for readers and turns Microsoft's titles ("CVE-2026-72979 Windows DHCP Server Remote Code Execution Vulnerability") into "Windows DHCP Server: remote code execution flaw".
+
 ## How it works
 
 ```
@@ -24,7 +37,8 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
                └─ score.py    assign a colour and record why
 
 app.py ──> dedupe.py   group the same story from different outlets
-       └─> geo.py      find the countries each story is about, for the map
+       ├─> geo.py      find the countries each story is about, for the map
+       └─> briefing.py the front page and map page, and the plain wording
 
 collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
 ```
@@ -77,17 +91,17 @@ Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploit
 
 ## Map
 
-`/map` shows where incidents happened and who the reporting blames, for the same time windows as the feed.
+`/map` shows where incidents happened and who the reporting blames. It opens on the last 7 days, with a switch for 24 hours to 14 days, and a World/Gulf switch that glides the map to the Gulf.
 
 - **Where it happened:** the country is filled in the colour of its most serious story, brighter the more stories it has.
-- **Blamed:** a purple dashed outline. A country counts as blamed when it's attached to attacker wording ("Chinese hackers", "Russia-linked group", "backed by Iran") or when a story names a group publicly tied to it (Lazarus → North Korea, Volt Typhoon → China, APT28 → Russia; any Microsoft "Typhoon", "Blizzard", "Sandstorm" or "Sleet" group). Every other country mentioned counts as where it happened.
-- **Blamed → targeted:** when one story has both, a curved line joins them.
+- **Blamed:** a purple outline, or purple hatching for a country that was only blamed. A country counts as blamed when it's attached to attacker wording ("Chinese hackers", "Russia-linked group", "backed by Iran") or when a story names a group publicly tied to it (Lazarus → North Korea, Volt Typhoon → China, APT28 → Russia; any Microsoft "Typhoon", "Blizzard", "Sandstorm" or "Sleet" group). Every other country mentioned counts as where it happened.
+- **Blamed → targeted:** when one story has both, a curved line with an arrow joins them.
 
-Clicking a country lists its stories, split into "Happened here" and "Blamed here", and each story in the feed shows its countries with a link to the map.
+Under the map, a list of every country on it (with its story count and how often it was blamed) filters the stories when you pick one; clicking a country on the map does the same, and the list works by keyboard. Stories that named no country are listed too, most important first, and the page says how many there are. Each story in the feed shows its countries with a link to the map.
 
 `geo.py` reads only the title and the first two sentences of the summary, because later sentences tend to mention countries in passing (where a researcher is based, older incidents). Matching is case-sensitive, so "US" isn't "us" and "Polish" isn't "polish". Tech news and events aren't mapped, and the page says how many stories named no country. Run `python geo.py` to print what it finds in your database, including the words that made each country blamed. A few phrases are skipped as places: a CISA warning names the US but isn't a US incident, and Pwn2Own Ireland is a contest, not an attack.
 
-The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (public domain). `tools/build_world.mjs` turns it into a static SVG once, offline, so the Pi serves a 120 KB file and loads nothing from other sites. Countries too small for the light 1:110m outlines, like Singapore and Bahrain, appear as dots when a story mentions them.
+The map is drawn from [Natural Earth](https://www.naturalearthdata.com) data (public domain). `tools/build_world.mjs` turns it into a static SVG once, offline, so the Pi loads nothing from other sites. The front page's small map uses a lighter copy with whole-number coordinates, and its Gulf map only the countries around the Gulf. Countries too small for the light 1:110m outlines, like Singapore and Bahrain, appear as dots when a story mentions them.
 
 ## Stock impact
 
@@ -159,6 +173,9 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 - **Feed content is treated as untrusted input.** Jinja escapes everything in the list, the detail panel only writes text with `textContent`, and any link that isn't `http` or `https` is dropped, so a compromised feed can't inject script or a `javascript:` link. Tested with a planted `<script>` headline.
 - **The Pi 3B has 1 GB of RAM**, so there is no framework beyond Flask, no JavaScript build step, and the collector runs as a one-shot job instead of a resident process.
 - **A strict Content Security Policy.** Every page gets a fresh random nonce, and only scripts and styles carrying it may run. Pages may only connect back to this server, so the password page physically can't send anything elsewhere.
+- **Designed like a newspaper.** The front page is a briefing, not a dashboard: serif headlines (system fonts only, since the security policy allows no web fonts), warm paper and ink colours, and severity shown as a coloured word before each headline ("Major.") rather than badges. Light and dark themes both work; the first visit follows the device's setting, a choice is remembered in the browser, and a small script in the page head sets it before anything is drawn, so there's no flash of the wrong theme. Every page shares the same masthead, grouped menus (Intel, Tools, Community; planned pages are named but not linked) and footer.
+- **Grouped stories are cached until the database changes.** Grouping the same story across outlets takes a few seconds on the Pi. The stories only change when the collector runs, which rewrites the database file, so the grouped stories are kept until the file changes and only the "5m ago" ages are worked out on each visit.
+- **Pages are compressed, except where that could leak a secret.** Gzip shrinks the map pages to about a third. The event form page is left uncompressed: it shows back what a visitor typed next to a form token, which is the setup the BREACH attack uses to guess secrets from response sizes.
 - **systemd over cron.** It keeps the dashboard alive, restarts it on failure, starts it on boot, and logs every collector run to the journal. Both units are sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`) so they can only write inside the project folder.
 
 ## Setup

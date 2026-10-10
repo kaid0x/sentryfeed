@@ -1,28 +1,21 @@
-"""Redesign prototypes (branch `redesign` only, not linked from the live site).
+"""What the front page and the map page show, worked out from the stories app.py loads.
 
-Three directions built on the same real data so they can be compared side by side:
-A, an operations dashboard; B, an intelligence briefing; C, a map-first situation room.
-Each has a home page and the password check as its tool page, at /proto/<a|b|c>.
+Also the plainer wording used across the site: Microsoft's advisory titles made readable,
+and the scorer's reasons ("mentions 'rce'") put in words a reader would use. score.py keeps
+its own wording, which stays exact for debugging the scoring rules.
 """
-import gzip
 import json
 import re
-import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import abort, render_template, request
 from markupsafe import Markup
 
-import events
 import stack
-import stocks
-from db import DB_PATH, connect
 from geo import NAMES as COUNTRY_NAMES
 
-DIRECTIONS = {"a": "Watch floor", "b": "The Briefing", "c": "Situation room"}
 SECURITY = ("red", "orange", "yellow")
 RANK = {"red": 0, "orange": 1, "yellow": 2, "green": 3, "blue": 4}
 GCC = {"AE", "SA", "QA", "KW", "BH", "OM"}
@@ -33,7 +26,7 @@ MARKET_DAYS = 30
 EXPLOITED_RE = re.compile(r"\b(?:exploited|exploiting|exploitation|zero-days?|0-days?|in the wild)\b", re.I)
 
 _TEMPLATES = Path(__file__).with_name("templates")
-# The map's shapes without the outer <svg> tag, so each prototype can crop it with its own viewBox.
+# The map's shapes without the outer <svg> tag, so each map can crop it with its own viewBox.
 # The file is built offline by tools/build_world.mjs from Natural Earth, never from feed content.
 _WORLD_TEXT = (_TEMPLATES / "_world.svg").read_text().split("\n", 1)[1].rsplit("</svg>", 1)[0]
 WORLD_SHAPES = Markup(_WORLD_TEXT)
@@ -96,19 +89,19 @@ FOOTER = [
 ]
 
 
-def nav(d):
-    """The grouped navigation being tested. A None link is a planned page, shown but not linked."""
-    return [
-        ("Intel", [("Feed", "/"), ("Map", "/proto/b/map" if d == "b" else "/map"), ("Stocks", "/stocks"), ("My stack", "/stack"),
-                   ("Vulnerabilities", None), ("Ransomware stats", None),
-                   ("Weekly digest", None), ("Gulf pulse", None)]),
-        ("Tools", [("Password check", f"/proto/{d}/password"), ("File & link check", "/scan"),
-                   ("Email header analyser", None), ("Domain check", None)]),
-        ("Community", [("Events", "/events"), ("Submit an event", "/events/submit")]),
-    ]
+# Grouped navigation: (group, [(label, link, page key)]). A None link is a planned page,
+# named in the menu but not linked, so nothing in the menu leads nowhere.
+NAV = [
+    ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
+               ("My stack", "/stack", "stack"), ("Vulnerabilities", None, None),
+               ("Ransomware stats", None, None), ("Weekly digest", None, None), ("Gulf pulse", None, None)]),
+    ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
+               ("Email header analyser", None, None), ("Domain check", None, None)]),
+    ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
+]
 
 
-# ---------- Plainer words (display only; score.py and the live site are unchanged) ----------
+# ---------- Plainer words ----------
 
 MS_KINDS = ("Remote Code Execution", "Elevation of Privilege", "Information Disclosure",
             "Security Feature Bypass", "Denial of Service", "Spoofing", "Tampering")
@@ -239,42 +232,6 @@ def by_importance(stories):
     return sorted(ordered, key=lambda s: (RANK.get(s["severity"], 9), -s["kev"], -len(s["also"])))
 
 
-def collected_at():
-    if not DB_PATH.exists():
-        return None
-    return datetime.fromtimestamp(DB_PATH.stat().st_mtime, timezone.utc).astimezone(DUBAI)
-
-
-def hour_strip(day, now):
-    """The last 24 hours, oldest first: per hour, security stories by severity and the worst one."""
-    hours = [Counter() for _ in range(24)]
-    for s in day:
-        if s["published"] and s["severity"] in SECURITY:
-            ago = int((now - datetime.fromisoformat(s["published"])).total_seconds() // 3600)
-            hours[23 - min(max(ago, 0), 23)][s["severity"]] += 1
-    strip = []
-    for i, counts in enumerate(hours):
-        start = (now - timedelta(hours=23 - i)).astimezone(DUBAI)
-        worst = next((sev for sev in SECURITY if counts[sev]), None)
-        strip.append({"label": start.strftime("%H:00"), "worst": worst, "total": sum(counts.values()),
-                      **{sev: counts[sev] for sev in SECURITY}})
-    return strip
-
-
-def daily(stories, now, days=14):
-    """Security stories per Dubai calendar day, oldest first."""
-    today = now.astimezone(DUBAI).date()
-    dates = [today - timedelta(days=n) for n in range(days - 1, -1, -1)]
-    counts = {d: Counter() for d in dates}
-    for s in stories:
-        if s["published"] and s["severity"] in SECURITY:
-            d = datetime.fromisoformat(s["published"]).astimezone(DUBAI).date()
-            if d in counts:
-                counts[d][s["severity"]] += 1
-    return [{"label": d.strftime("%a %d %b"), "short": d.strftime("%d"), "today": d == today,
-             **{sev: counts[d][sev] for sev in SECURITY}, "total": sum(counts[d].values())} for d in dates]
-
-
 def country_map(stories):
     """Per country the worst severity and story count (where it happened), who is blamed, and blame lines."""
     hit, blamed, lines = {}, Counter(), Counter()
@@ -309,129 +266,63 @@ def arc(a, b):
     return f"M{x1:.1f},{y1:.1f} Q{mx:.1f},{my:.1f} {x2:.1f},{y2:.1f}"
 
 
-def home_data(app_mod):
-    now = datetime.now(timezone.utc)
-    stories = app_mod.load_items(14)
-    app_mod.attach_stock_summaries(stories)
-
+def prepare(stories):
+    """Add the readable headline and reason every page shows."""
     for s in stories:
         s["headline"] = clean_title(s)
         s["reason"] = plain_reason(s["severity_reason"])
+    return stories
 
-    def within(hours):
-        cutoff = (now - timedelta(hours=hours)).isoformat()
-        return [s for s in stories if not s["published"] or s["published"] >= cutoff]
 
-    day, week = within(24), within(24 * 7)
+def _within(stories, now, hours):
+    cutoff = (now - timedelta(hours=hours)).isoformat()
+    return [s for s in stories if not s["published"] or s["published"] >= cutoff]
+
+
+def front_page(stories, incidents, upcoming):
+    """Everything the home page needs. stories: the last 14 days, prepared, with stock summaries."""
+    now = datetime.now(timezone.utc)
+    day, week = _within(stories, now, 24), _within(stories, now, 24 * 7)
     security_day = [s for s in day if s["severity"] in SECURITY]
     security_week = [s for s in week if s["severity"] in SECURITY]
     placed_week = [s for s in security_week if s["where"] or s["blamed"]]
-
-    gulf = gulf_split([s for s in week if s["severity"] != "blue" and
-                       (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])
-
-    conn = connect()
-    try:
-        upcoming = events.upcoming(conn)[:3]
-    finally:
-        conn.close()
-    for e in upcoming:
-        e["url"] = app_mod.safe_link(e["url"])
-
+    gulf, gulf_dropped = gulf_split([s for s in week if s["severity"] != "blue" and
+                                     (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])
     month_ago = (now - timedelta(days=MARKET_DAYS)).date().isoformat()
-    markets = [i for i in app_mod.load_incidents() if i["date"] >= month_ago][:4]
+    markets = [i for i in incidents if i["date"] >= month_ago][:4]
     for inc in markets:
         inc["story"] = inc["stories"][-1]
-        inc["story"]["link"] = app_mod.safe_link(inc["story"]["link"])
-
-    when = collected_at()
     return {
-        "now": now.astimezone(DUBAI),
-        "collected": when,
-        "updated": app_mod.last_updated(),
         "counts": {
             "major": sum(1 for s in day if s["severity"] == "red"),
             "exploited": sum(1 for s in security_day if s["kev"]),
             "companies": len({s["stock"]["company"] for s in day if s.get("stock")}),
             "day": len(day),
-            "security_day": len(security_day),
             "week": len(security_week),
             "placed_week": len(placed_week),
         },
         "top": by_importance(group_advisories(security_day))[:HOME_STORIES],
         "exploited": by_importance([s for s in security_week
                                     if s["kev"] or EXPLOITED_RE.search(s["title"] or "")])[:5],
-        "gulf": by_importance(gulf[0])[:5],
-        "gulf_dropped": gulf[1],
-        "unplaced": by_importance([s for s in security_week if not (s["where"] or s["blamed"])])[:5],
-        "placed": by_importance(placed_week),
-        "all_unplaced": len(security_week) - len(placed_week),
+        "gulf": by_importance(gulf)[:5],
+        "gulf_dropped": gulf_dropped,
         "map": country_map(placed_week),
-        "hours": hour_strip(day, now),
-        "days": daily(stories, now),
-        "events": upcoming,
+        "events": upcoming[:3],
         "markets": markets,
-        "has_sec_contact": bool(stocks.sec_contact()),
-        "has_prices_key": bool(stocks.av_key()),
-        "stack_stories": [{"title": s["title"], "link": s["link"], "severity": s["severity"], "age": s["age"],
+        "stack_stories": [{"title": s["headline"], "link": s["link"], "severity": s["severity"], "age": s["age"],
                            "products": s["products"]} for s in stories if s["products"]],
         "stack_names": stack.NAMES,
     }
 
 
-def register(app, app_mod):
-    """Add the prototype routes. app_mod is app.py itself, passed in to avoid a circular import."""
-    app.jinja_env.filters["country"] = lambda cc: NAMES.get(cc, cc)
-    app.jinja_env.filters["product"] = lambda pid: stack.NAMES.get(pid, pid)
-
-    def common(d):
-        if d not in DIRECTIONS:
-            abort(404)
-        return {"d": d, "direction": DIRECTIONS[d], "nav": nav(d), "footer": FOOTER, "severities": dict(app_mod.SEVERITIES),
-                "names": NAMES, "world": WORLD_SHAPES, "world_lite": WORLD_LITE, "gulf_shapes": GULF_SHAPES,
-                "gulf_view": " ".join(map(str, GULF_VIEW)), "centres": CENTRES}
-
-    @app.route("/proto")
-    def proto_index():
-        return render_template("proto/index.html", directions=DIRECTIONS)
-
-    @app.route("/proto/<d>")
-    def proto_home(d):
-        ctx = common(d)
-        try:
-            data, error = home_data(app_mod), None
-        except (sqlite3.Error, OSError) as exc:
-            data, error = None, type(exc).__name__
-        page = render_template(f"proto/{d}_home.html", **ctx, data=data, error=error, page="home")
-        return (page, 503) if error else page
-
-    @app.route("/proto/<d>/map")
-    def proto_map(d):
-        if d != "b":
-            abort(404)      # only B has its own map page; C is a map already
-        ctx = common(d)
-        try:
-            data, error = home_data(app_mod), None
-        except (sqlite3.Error, OSError) as exc:
-            data, error = None, type(exc).__name__
-        page = render_template("proto/b_map.html", **ctx, data=data, error=error, page="map")
-        return (page, 503) if error else page
-
-    @app.after_request
-    def compress(resp):
-        """Gzip prototype pages: the map's SVG shrinks to about a third. Only /proto pages, which hold
-        no secrets and reflect no form input, so compression can't leak anything (the BREACH attack)."""
-        if (request.path.startswith("/proto") and resp.status_code in (200, 503) and resp.mimetype == "text/html"
-                and not resp.direct_passthrough and "gzip" in request.headers.get("Accept-Encoding", "")
-                and "Content-Encoding" not in resp.headers):
-            body = resp.get_data()
-            if len(body) > 1024:
-                resp.set_data(gzip.compress(body, compresslevel=6))
-                resp.headers["Content-Encoding"] = "gzip"
-                resp.headers["Vary"] = "Accept-Encoding"
-        return resp
-
-    @app.route("/proto/<d>/password")
-    def proto_password(d):
-        ctx = common(d)
-        return render_template(f"proto/{d}_password.html", **ctx, collected=collected_at(), page="password")
+def map_page(stories):
+    """The map page: stories in the chosen window, those with a country and those without."""
+    security = [s for s in stories if s["severity"] in SECURITY]
+    placed = [s for s in security if s["where"] or s["blamed"]]
+    return {
+        "total": len(security),
+        "placed": by_importance(placed),
+        "unplaced": by_importance([s for s in security if not (s["where"] or s["blamed"])])[:6],
+        "unplaced_count": len(security) - len(placed),
+        "map": country_map(placed),
+    }

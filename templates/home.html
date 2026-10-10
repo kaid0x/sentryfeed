@@ -1,9 +1,6 @@
-{% extends "proto/b_base.html" %}
-{% import "proto/_ui.html" as ui with context %}
-{% set page_title = "SentryFeed: today's briefing (prototype B)" %}
-{% set now_iso = data.now.isoformat() if data else "" %}
-{% block dateline %}{% if data %}{{ data.now.strftime("%A %-d %B %Y") }}{% endif %}{% endblock %}
-{% block updated %}{% if data and data.collected %}Updated {{ data.collected.strftime("%H:%M") }} Dubai time ({{ data.updated }}){% endif %}{% endblock %}
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block masthead_class %}{% endblock %}
 
 {% macro words(n, one, many) %}{% if n == 0 %}no {{ many }}{% else %}{{ n }} {{ one if n == 1 else many }}{% endif %}{% endmacro %}
 
@@ -141,7 +138,7 @@
 {% endblock %}
 
 {% block body %}
-<main>
+<main class="wrap">
 {% if error %}
   <div class="error-box">
     <h1 class="topline">The briefing couldn't be put together.</h1>
@@ -152,7 +149,7 @@
   <h1 class="topline">In the last 24 hours: <b class="{{ 'n-major' if c.major }}">{{ words(c.major, "Major story", "Major stories") }}</b>,
     <b>{{ words(c.exploited, "story", "stories") }}</b> about flaws on CISA's exploited list, and
     <b>{{ words(c.companies, "breached listed company", "breached listed companies") }}</b>.</h1>
-  <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.{% if data.collected %}<span class="phone-only"> Updated {{ data.collected.strftime("%H:%M") }} Dubai time.</span>{% endif %}</p>
+  <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.{% if site_collected %}<span class="phone-only"> Updated {{ site_collected.strftime("%H:%M") }} Dubai time.</span>{% endif %}</p>
 
   <section class="stack-strip" aria-label="Your stack">
     <div id="stack-out"><p>Checking your stack…</p></div>
@@ -177,11 +174,11 @@
         {{ meta(s) }}
       </article>
       {% endfor %}
-      <a class="more-link" href="/?days=1">All {{ c.day }} stories from the last 24 hours</a>
+      <a class="more-link" href="/feed?days=1">All {{ c.day }} stories from the last 24 hours</a>
     </div>
   </div>
   {% else %}
-  <p class="empty">A quiet day: nothing scored Major, Medium or Low in the last 24 hours. <a href="/?days=3">See the last 3 days in the feed</a>.</p>
+  <p class="empty">A quiet day: nothing scored Major, Medium or Low in the last 24 hours. <a href="/feed?days=3">See the last 3 days in the feed</a>.</p>
   {% endif %}
 
   <section class="section" aria-labelledby="h-exploited">
@@ -232,7 +229,7 @@
   <section class="section" aria-labelledby="h-markets">
     <div class="section-head">
       <h2 id="h-markets">Markets</h2>
-      <p class="section-note">Listed companies named as breach victims in the last {{ 30 }} days, and how their shares moved against their market.</p>
+      <p class="section-note">Listed companies named as breach victims in the last 30 days, and how their shares moved against their market.</p>
     </div>
     {% if data.markets %}
     <table class="markets">
@@ -252,7 +249,7 @@
     </table>
     <a class="more-link" href="/stocks">Charts and filings on the Stocks page</a>
     {% else %}
-    <p class="empty">No breach story named a listed company in the last 30 days.{% if not data.has_sec_contact %} US companies aren't being matched on this server yet, because it has no SEC contact set.{% endif %} <a href="/stocks">Stocks page</a>.</p>
+    <p class="empty">No breach story named a listed company in the last 30 days.{% if not has_sec_contact %} US companies aren't being matched on this server yet, because it has no SEC contact set.{% endif %} <a href="/stocks">Stocks page</a>.</p>
     {% endif %}
   </section>
 
@@ -262,7 +259,7 @@
       <div>
         <h3>Where it happened</h3>
         {% if data.map.countries %}
-        <a class="map-link" href="/proto/b/map" aria-label="Open the map: {{ data.map.countries|length }} countries named in this week's stories">
+        <a class="map-link" href="/map" aria-label="Open the map: {{ data.map.countries|length }} countries named in this week's stories">
         <svg class="bmap" viewBox="0 -2 960 422" aria-hidden="true" focusable="false">
           {{ world_lite }}
           {% for l in data.map.lines %}<path class="link" d="{{ l.path }}"/>{% endfor %}
@@ -271,7 +268,7 @@
         <ul class="country-counts">
           {% for co in data.map.countries[:6] %}<li>{{ co.name }} <b>{{ co.count }}</b></li>{% endfor %}
         </ul>
-        <p class="section-note">{{ c.placed_week }} of {{ c.week }} stories this week named a country. <a href="/proto/b/map">Open the map</a>.</p>
+        <p class="section-note">{{ c.placed_week }} of {{ c.week }} stories this week named a country. <a href="/map">Open the map</a>.</p>
         {% else %}
         <p class="empty">No story this week named a country.</p>
         {% endif %}
@@ -299,7 +296,7 @@
     </div>
   </section>
 
-  <p class="continue"><a href="/?days=1">Read all {{ c.day }} stories in the feed</a></p>
+  <p class="continue"><a href="/feed?days=1">Read all {{ c.day }} stories in the feed</a></p>
 {% endif %}
 </main>
 {% endblock %}

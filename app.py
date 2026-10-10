@@ -1,12 +1,15 @@
+import copy
+import gzip
 import os
 import re
 import secrets
-import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+
+import sqlite3
 
 import requests
 from flask import Flask, Response, g, jsonify, redirect, render_template, request, url_for
@@ -14,7 +17,8 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from db import DB_PATH, connect
 from dedupe import group_stories
-from geo import NAMES as COUNTRY_NAMES, locate
+from geo import locate
+import briefing
 import events
 import stack
 import stocks
@@ -43,6 +47,7 @@ def load_secret():
 app = Flask(__name__)
 app.config["SECRET_KEY"] = load_secret()
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024     # forms only; nothing big is ever posted
+app.jinja_env.filters["country"] = lambda cc: briefing.NAMES.get(cc, cc)   # "AE" -> "United Arab Emirates"
 FORM_SIGNER = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="event-form")
 FORM_MAX_AGE = 2 * 3600       # a form left open longer than this has to be reloaded
 FORM_MIN_SECONDS = 3          # people take longer than this to fill it in; bots often don't
@@ -112,10 +117,33 @@ def load_items_ungrouped(days):
 
 
 # What the page needs about each other outlet covering a story.
-ALSO_FIELDS = ("id", "source", "title", "link", "age", "match")
+ALSO_FIELDS = ("id", "source", "title", "link", "age", "published", "match")
+
+# Grouped stories per window, kept until the database changes. Grouping takes a few
+# seconds on the Pi, and the stories only change when the collector runs (or an event
+# is submitted), which always rewrites the database file.
+_STORY_CACHE = {}
 
 
 def load_items(days):
+    """One entry per story, ready for the pages (see _group_items). Each call gets its
+    own copy, with ages worked out afresh and anything older than the window dropped."""
+    stamp = DB_PATH.stat().st_mtime if DB_PATH.exists() else None
+    cached = _STORY_CACHE.get(days)
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, _group_items(days))
+        _STORY_CACHE[days] = cached
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=days)).isoformat()
+    stories = copy.deepcopy([s for s in cached[1] if not s["published"] or s["published"] >= cutoff])
+    for story in stories:
+        story["age"] = ago(story["published"], now)
+        for other in story["also"]:
+            other["age"] = ago(other["published"], now)
+    return briefing.prepare(stories)
+
+
+def _group_items(days):
     """One entry per story. When several outlets covered it, the highest-ranked
     article leads (so the story takes its colour), and the rest are listed under
     "also" with their CVEs and countries added to the lead's."""
@@ -147,9 +175,9 @@ def last_updated():
     return ago(mtime.isoformat(), datetime.now(timezone.utc))
 
 
-def window_days():
-    days = request.args.get("days", DEFAULT_DAYS, type=int)
-    return days if days in dict(WINDOWS) else DEFAULT_DAYS
+def window_days(default=DEFAULT_DAYS):
+    days = request.args.get("days", default, type=int)
+    return days if days in dict(WINDOWS) else default
 
 
 @app.before_request
@@ -158,8 +186,19 @@ def make_csp_nonce():
 
 
 @app.context_processor
-def inject_csp_nonce():
-    return {"csp_nonce": g.get("csp_nonce", "")}
+def inject_page_basics():
+    """What every page's masthead, menus and footer need."""
+    collected = None
+    if DB_PATH.exists():
+        collected = datetime.fromtimestamp(DB_PATH.stat().st_mtime, timezone.utc).astimezone(briefing.DUBAI)
+    return {
+        "csp_nonce": g.get("csp_nonce", ""),
+        "site_nav": briefing.NAV,
+        "site_footer": briefing.FOOTER,
+        "site_today": datetime.now(briefing.DUBAI),
+        "site_collected": collected,
+        "site_updated": last_updated(),
+    }
 
 
 @app.after_request
@@ -176,11 +215,67 @@ def security_headers(resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["Referrer-Policy"] = "no-referrer"
     resp.headers["X-Frame-Options"] = "DENY"
+    return compress(resp)
+
+
+# Pages that echo back what a visitor typed, next to a token. Compressing those could let an
+# attacker guess the token from response sizes (the BREACH attack), so they go uncompressed.
+NO_COMPRESS = {"/events/submit"}
+
+
+def compress(resp):
+    """Gzip HTML pages. The map's shapes shrink to about a third, which matters on the Pi."""
+    if (resp.mimetype == "text/html" and resp.status_code in (200, 400, 503) and not resp.direct_passthrough
+            and request.path not in NO_COMPRESS and "Content-Encoding" not in resp.headers
+            and "gzip" in request.headers.get("Accept-Encoding", "")):
+        body = resp.get_data()
+        if len(body) > 1024:
+            resp.set_data(gzip.compress(body, compresslevel=6))
+            resp.headers["Content-Encoding"] = "gzip"
+            resp.headers["Vary"] = "Accept-Encoding"
     return resp
 
 
+def page_or_unavailable(template, build, **context):
+    """Render a page from build(), or the same template in its error state if the
+    database can't be read (the collector may be part-way through a run)."""
+    try:
+        data, error = build(), None
+    except (sqlite3.Error, OSError) as exc:
+        data, error = None, type(exc).__name__
+    page = render_template(template, data=data, error=error, **context)
+    return (page, 503) if error else page
+
+
 @app.route("/")
-def index():
+def home():
+    # Old bookmarks of the feed, like /?days=3, still land on the feed.
+    if "days" in request.args:
+        return redirect(url_for("feed", days=window_days()), code=301)
+
+    def build():
+        stories = load_items(14)
+        attach_stock_summaries(stories)
+        incidents = load_incidents()
+        for inc in incidents:
+            for story in inc["stories"]:
+                story["link"] = safe_link(story["link"])
+        conn = connect()
+        try:
+            upcoming = events.upcoming(conn)[:3]
+        finally:
+            conn.close()
+        for e in upcoming:
+            e["url"] = safe_link(e["url"])
+        return briefing.front_page(stories, incidents, upcoming)
+
+    return page_or_unavailable("home.html", build, active="home", gulf_view=" ".join(map(str, briefing.GULF_VIEW)),
+                               gulf_shapes=briefing.GULF_SHAPES, world_lite=briefing.WORLD_LITE,
+                               centres=briefing.CENTRES, has_sec_contact=bool(stocks.sec_contact()))
+
+
+@app.route("/feed")
+def feed():
     days = window_days()
     items = load_items(days)
     attach_stock_summaries(items)
@@ -196,11 +291,12 @@ def index():
     items[first_blue:first_blue] = listed
     counts = Counter(i["severity"] for i in items)
     return render_template(
-        "index.html",
+        "feed.html",
+        active="feed",
         items=items,
         counts=counts,
         tiles=[(k, label) for k, label in SEVERITIES if counts[k] or k not in OPTIONAL_TILES],
-        country_names=COUNTRY_NAMES,
+        country_names=briefing.NAMES,
         kev_count=sum(1 for i in items if i["kev"]),
         severities=SEVERITIES,
         windows=WINDOWS,
@@ -255,26 +351,15 @@ def stock_impact():
     )
 
 
-# Stories on the map: incidents only, not tech news or events.
-MAP_SEVERITIES = ("red", "orange", "yellow")
-MAP_FIELDS = ("title", "link", "source", "age", "severity", "where", "blamed")
+MAP_DAYS = 7     # a week gives the map enough countries to be worth reading
 
 
 @app.route("/map")
 def world_map():
-    days = window_days()
-    stories = [s for s in load_items(days) if s["severity"] in MAP_SEVERITIES]
-    placed = [s for s in stories if s["where"] or s["blamed"]]
-    return render_template(
-        "map.html",
-        stories=[{**{k: s[k] for k in MAP_FIELDS}, "sources": 1 + len(s["also"])} for s in placed],
-        unplaced=len(stories) - len(placed),
-        country_names=COUNTRY_NAMES,
-        severities=SEVERITIES,
-        windows=WINDOWS,
-        days=days,
-        updated=last_updated(),
-    )
+    days = window_days(MAP_DAYS)
+    return page_or_unavailable("map.html", lambda: briefing.map_page(load_items(days)), active="map",
+                               days=days, windows=WINDOWS, world=briefing.WORLD_SHAPES,
+                               gulf_view=" ".join(map(str, briefing.GULF_VIEW)))
 
 
 STACK_DAYS = 14
@@ -288,7 +373,8 @@ def my_stack():
         "stack.html",
         catalog=stack.catalog(),
         names=stack.NAMES,
-        stories=[{**{k: s[k] for k in STACK_FIELDS}, "sources": 1 + len(s["also"])} for s in stories],
+        stories=[{**{k: s[k] for k in STACK_FIELDS}, "title": s["headline"], "severity_reason": s["reason"],
+                  "sources": 1 + len(s["also"])} for s in stories],
         days=STACK_DAYS,
         severities=SEVERITIES,
     )
@@ -387,10 +473,6 @@ def pwned_range(prefix):
     resp = Response(upstream.text, mimetype="text/plain")
     resp.headers["Cache-Control"] = "no-store"
     return resp
-
-
-import proto  # noqa: E402  (redesign branch only)
-proto.register(app, sys.modules[__name__])
 
 
 if __name__ == "__main__":
