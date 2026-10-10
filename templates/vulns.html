@@ -92,14 +92,14 @@
              value="{{ asked or '' }}" aria-describedby="cve-help{% if asked is not none %} cve-error{% endif %}">
       <button type="submit">Look up</button>
     </div>
-    <p class="help" id="cve-help">Any CVE ID. Only the ID is passed on, to NVD and FIRST, and nothing about you.</p>
+    <p class="help" id="cve-help">Any {{ ui.term("cve", "CVE") }} ID. Only the ID is passed on, to NVD and FIRST, and nothing about you.</p>
     {% if asked is not none %}<p class="error" id="cve-error" role="alert">That isn't a CVE ID. They look like CVE-2026-12345.</p>{% endif %}
   </form>
 
   <section class="three" aria-label="Three questions about any flaw">
-    <div><h2>How bad would it be?</h2><p><b>CVSS</b>: a score out of 10 for the damage if the flaw is used. A high score doesn't mean anyone is using it.</p></div>
-    <div><h2>How likely is it to be used?</h2><p><b>EPSS</b>, from FIRST: the estimated chance it's exploited in the next 30 days, updated daily.</p></div>
-    <div><h2>Is it already being used?</h2><p><b>KEV</b>: CISA's list of flaws seen in real attacks. If one you run is on it, patch it first.</p></div>
+    <div><h2>How bad would it be?</h2><p><b>{{ ui.term("cvss", "CVSS") }}</b>: a score out of 10 for the damage if the flaw is used. A high score doesn't mean anyone is using it.</p></div>
+    <div><h2>How likely is it to be used?</h2><p><b>{{ ui.term("epss", "EPSS") }}</b>, from FIRST: the estimated chance it's exploited in the next 30 days, updated daily.</p></div>
+    <div><h2>Is it already being used?</h2><p><b>{{ ui.term("kev", "KEV") }}</b>: CISA's list of flaws seen in real attacks. If one you run is on it, patch it first.</p></div>
   </section>
 
 {% if error %}
@@ -127,7 +127,7 @@
           <h3><a href="/vulns/{{ k.cve_id }}">{{ k.name }}</a></h3>
           <p class="meta">
             {% if k.due %}<span class="{{ 'soon' if k.due in ('due today', 'due tomorrow') }}">{{ k.due[0] | upper }}{{ k.due[1:] }}</span>{% endif %}
-            {% if k.ransomware %}<span class="ransom">Used by ransomware</span>{% endif %}
+            {% if k.ransomware %}<span class="ransom">Used by {{ ui.term("ransomware", "ransomware") }}</span>{% endif %}
             <span>Chance of use: {{ k.epss_text or "not scored yet" }}</span>
             {% if k.stories %}<span>{{ ui.plural(k.stories, "story", "stories") }} on SentryFeed</span>{% endif %}
           </p>

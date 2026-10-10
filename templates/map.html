@@ -108,7 +108,7 @@
 </style>{% endif %}
 {% endblock %}
 
-{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason }}</p>{% endmacro %}
+{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason | glossed }}</p>{% endmacro %}
 
 {% block body %}
 <main class="wrap">

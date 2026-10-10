@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
 {% set active = "scan" %}
 
 {% block title %}File & link check · SentryFeed{% endblock %}
@@ -49,7 +50,7 @@
   }
   .links { display: flex; flex-wrap: wrap; gap: 8px; }
   .vt {
-    display: inline-block; font-size: 14px; text-decoration: none;
+    display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; text-decoration: none;
     border: 1px solid var(--text); border-radius: 6px; padding: 8px 14px;
   }
   .vt:hover { background: var(--text); color: var(--bg); }
@@ -76,13 +77,13 @@
 <main class="page">
   <div class="page-inner">
     <h1>Is this file or link safe?</h1>
-    <p class="lede">Look things up in VirusTotal, which checks them against 70+ antivirus engines and security services. Files are fingerprinted on your device and never uploaded.</p>
+    <p class="lede">Look things up in VirusTotal, which checks them against 70+ antivirus engines and security services, with second opinions from AbuseIPDB, Shodan and URLhaus where they apply. Files are fingerprinted on your device and never uploaded.</p>
 
     <noscript><p class="error">These checks run in your browser, so they need JavaScript turned on.</p></noscript>
 
     <section class="tool" aria-labelledby="file-heading">
       <h2 id="file-heading">Check a file</h2>
-      <p class="hint">Your browser calculates the file's SHA-256 fingerprint. Only that goes to VirusTotal.</p>
+      <p class="hint">Your browser calculates the file's SHA-256 {{ ui.term("hash", "fingerprint") }}. Only that goes to VirusTotal.</p>
 
       <input type="file" id="file">
       <label class="drop" id="drop" for="file">
@@ -103,7 +104,7 @@
 
     <section class="tool" aria-labelledby="link-heading">
       <h2 id="link-heading">Check a link, domain, IP or file hash</h2>
-      <p class="hint">Paste a full link, a domain like example.com, an IP address, or an MD5, SHA-1 or SHA-256 hash.</p>
+      <p class="hint">Paste a full link, a domain like example.com, an IP address, or an MD5, SHA-1 or SHA-256 {{ ui.term("hash", "hash") }}.</p>
 
       <form id="link-form" novalidate>
         <label class="field-label" for="link">What to check</label>
@@ -120,10 +121,10 @@
         <code class="value" id="link-value"></code>
         <div class="links" id="link-links"></div>
       </div>
-      <p class="warn">VirusTotal adds everything looked up through its website to its dataset, where other researchers can see it, and it may visit a link to scan it. Don't check links that contain personal details, like password-reset, invite or document-sharing links.</p>
+      <p class="warn">VirusTotal adds everything looked up through its website to its dataset, where other researchers can see it, and it may visit a link to scan it. The other services can see what you search for too, and some ask you to confirm you're not a robot first. Don't check links that contain personal details, like password-reset, invite or document-sharing links.</p>
     </section>
 
-    <p class="credit">Results come from <a href="https://www.virustotal.com" target="_blank" rel="noopener noreferrer">VirusTotal</a>. SentryFeed only builds the link to the right report; the lookup happens on VirusTotal's site.</p>
+    <p class="credit">Results come from <a href="https://www.virustotal.com" target="_blank" rel="noopener noreferrer">VirusTotal</a>, <a href="https://www.abuseipdb.com" target="_blank" rel="noopener noreferrer">AbuseIPDB</a>, <a href="https://www.shodan.io" target="_blank" rel="noopener noreferrer">Shodan</a> and <a href="https://urlhaus.abuse.ch" target="_blank" rel="noopener noreferrer">URLhaus</a>. SentryFeed only builds the link to the right page; each lookup happens on that service's own site, never through SentryFeed.</p>
   </div>
 </main>
 {% endblock %}
@@ -135,6 +136,11 @@
 (function () {
   const $ = (id) => document.getElementById(id);
   const VT = "https://www.virustotal.com/gui/";
+  // Second opinions, each only for what it covers: AbuseIPDB (IPs reported for abuse), Shodan (what an IP
+  // or domain exposes to the internet) and URLhaus (links and domains spreading malware).
+  const ABUSEIPDB = "https://www.abuseipdb.com/check/";
+  const SHODAN = "https://www.shodan.io/";
+  const URLHAUS = "https://urlhaus.abuse.ch/browse.php?search=";
   const CHUNK = 4 * 1024 * 1024;
 
   function makeLink(href, text, secondary) {
@@ -210,6 +216,21 @@
     } catch { return null; }
   }
 
+  function ipLinks(ip) {
+    return [
+      [VT + "ip-address/" + ip, "Open VirusTotal report ↗"],
+      [ABUSEIPDB + ip, "AbuseIPDB: reported for abuse? ↗", true],
+      [SHODAN + "host/" + ip, "Shodan: what it exposes ↗", true],
+    ];
+  }
+  function domainLinks(domain) {
+    return [
+      [VT + "domain/" + domain, "Open VirusTotal report ↗"],
+      [URLHAUS + encodeURIComponent(domain), "URLhaus: spreading malware? ↗", true],
+      [SHODAN + "domain/" + domain, "Shodan: its DNS records ↗", true],
+    ];
+  }
+
   // Returns { kind, value, links: [[href, text, secondary], ...] } or null.
   function classify(raw) {
     const text = raw.trim();
@@ -218,7 +239,7 @@
       return { kind: "File hash", value: hash, links: [[VT + "file/" + hash, "Open VirusTotal report ↗"]] };
     }
     if (IPV4_RE.test(text)) {
-      return { kind: "IP address", value: text, links: [[VT + "ip-address/" + text, "Open VirusTotal report ↗"]] };
+      return { kind: "IP address", value: text, links: ipLinks(text) };
     }
 
     // A full link, or something like example.com/page typed without https://
@@ -232,13 +253,14 @@
     const bare = !hasScheme && url.pathname === "/" && !url.search && !url.hash && !text.includes("/");
     const hostHref = hostIsIp ? VT + "ip-address/" + host : VT + "domain/" + host;
     if (bare) {
-      return { kind: hostIsIp ? "IP address" : "Domain", value: host, links: [[hostHref, "Open VirusTotal report ↗"]] };
+      return { kind: hostIsIp ? "IP address" : "Domain", value: host, links: hostIsIp ? ipLinks(host) : domainLinks(host) };
     }
     return {
       kind: hasScheme ? "Link" : "Link (https:// added)",
       value: url.href,
       links: [
         [VT + "search/" + encodeURIComponent(url.href), "Check this link ↗"],
+        [URLHAUS + encodeURIComponent(url.href), "URLhaus: known malware link? ↗", true],
         [hostHref, "Check " + host + " ↗", true],
       ],
     };

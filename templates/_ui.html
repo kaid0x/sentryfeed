@@ -381,3 +381,59 @@
 })();
 </script>
 {% endmacro %}
+
+{# A glossary term: plain text until the script below makes it a button with a one-line definition.
+   Not upgraded inside links or buttons, where a button can't go. #}
+{% macro term(key, text) %}<span class="term" data-term="{{ key }}">{{ text }}</span>{% endmacro %}
+
+{% macro glossary_script() %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const GLOSSARY = {{ site_glossary | tojson }};
+  let open = null;
+  function close(refocus) {
+    if (!open) return;
+    open.tip.hidden = true;
+    open.button.setAttribute("aria-expanded", "false");
+    if (refocus) open.button.focus();
+    open = null;
+  }
+  document.querySelectorAll("span.term[data-term]").forEach((span, i) => {
+    const entry = GLOSSARY[span.dataset.term];
+    if (!entry || span.closest("a, button, label")) return;
+    const wrap = document.createElement("span");
+    wrap.className = "term-wrap";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "term";
+    button.textContent = span.textContent;
+    button.setAttribute("aria-expanded", "false");
+    const tip = document.createElement("span");
+    tip.className = "term-tip";
+    tip.id = "term-tip-" + i;
+    tip.hidden = true;
+    const name = document.createElement("strong");
+    name.textContent = entry[0] + ":";
+    tip.append(name, " " + entry[1]);
+    button.setAttribute("aria-controls", tip.id);
+    wrap.append(button, tip);
+    span.replaceWith(wrap);
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const was = open && open.button === button;
+      close(false);
+      if (was) return;
+      tip.hidden = false;
+      button.setAttribute("aria-expanded", "true");
+      open = { button, tip };
+      // Keep the definition on screen: nudge it left if it would run off the right edge.
+      tip.style.left = "0px";
+      const overflow = tip.getBoundingClientRect().right - (document.documentElement.clientWidth - 12);
+      if (overflow > 0) tip.style.left = -overflow + "px";
+    });
+  });
+  document.addEventListener("click", (e) => { if (open && !open.tip.contains(e.target)) close(false); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && open) close(true); });
+})();
+</script>
+{% endmacro %}

@@ -28,7 +28,7 @@
 {% endif %}
 {% endmacro %}
 
-{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason }}</p>{% endmacro %}
+{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason | glossed }}</p>{% endmacro %}
 
 {% block styles %}
 <style nonce="{{ csp_nonce }}">
@@ -147,7 +147,7 @@
 {% else %}
   {% set c = data.counts %}
   <h1 class="topline">In the last 24 hours: <b class="{{ 'n-major' if c.major }}">{{ words(c.major, "Major story", "Major stories") }}</b>,
-    <b>{{ words(c.exploited, "story", "stories") }}</b> about flaws on CISA's exploited list, and
+    <b>{{ words(c.exploited, "story", "stories") }}</b> about flaws on {{ ui.term("kev", "CISA's exploited list") }}, and
     <b>{{ words(c.companies, "breached listed company", "breached listed companies") }}</b>.</h1>
   <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.{% if site_collected %}<span class="phone-only"> Updated {{ site_collected.strftime("%H:%M") }} Dubai time.</span>{% endif %}</p>
 
@@ -184,7 +184,7 @@
   <section class="section" aria-labelledby="h-exploited">
     <div class="section-head">
       <h2 id="h-exploited">Being exploited now</h2>
-      <p class="section-note">Last 7 days. Flaws on CISA's Known Exploited Vulnerabilities list, or that the story says are already being used. <a href="/vulns">Everything CISA added recently</a>.</p>
+      <p class="section-note">Last 7 days. Flaws on CISA's {{ ui.term("kev", "Known Exploited Vulnerabilities list") }}, or that the story says are already being used. <a href="/vulns">Everything CISA added recently</a>.</p>
     </div>
     {% if data.exploited %}
     <ol class="numbered">

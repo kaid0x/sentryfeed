@@ -85,7 +85,7 @@
   <div class="feed-head">
     <div>
       <h1>The feed</h1>
-      <p class="standfirst">Every story from the last {{ "24 hours" if days == 1 else dict(windows)[days] }}, most serious first: {{ ui.plural(items|length, "story", "stories") }}{% if kev_count %}, {{ kev_count }} on CISA's exploited list{% endif %}.</p>
+      <p class="standfirst">Every story from the last {{ "24 hours" if days == 1 else dict(windows)[days] }}, most serious first: {{ ui.plural(items|length, "story", "stories") }}{% if kev_count %}, {{ kev_count }} on {{ ui.term("kev", "CISA's exploited list") }}{% endif %}.</p>
     </div>
     <div class="controls">
       <button class="stack-toggle" id="stack-toggle" type="button" aria-pressed="false" hidden>My stack</button>

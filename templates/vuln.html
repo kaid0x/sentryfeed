@@ -62,7 +62,7 @@
       <h2>How bad would it be?</h2>
       {% if cvss is not none %}
       <p class="big">{{ cvss }} <small>out of 10</small></p>
-      <p>CVSS rates it {{ band }}{% if cvss >= 9 %}: about as damaging as flaws get{% endif %}.</p>
+      <p>{{ ui.term("cvss", "CVSS") }} rates it {{ band }}{% if cvss >= 9 %}: about as damaging as flaws get{% endif %}.</p>
       {% else %}
       <p class="big">Not scored</p>
       <p>NVD often scores new CVEs a few days after they're published.</p>
@@ -72,7 +72,7 @@
       <h2>How likely is it to be used?</h2>
       {% if score %}
       <p class="big">{{ epss_text }}</p>
-      <p>Estimated chance of exploitation in the next 30 days, {{ percentile_text }} (EPSS, {{ score.day }}).</p>
+      <p>Estimated chance of exploitation in the next 30 days, {{ percentile_text }} ({{ ui.term("epss", "EPSS") }}, {{ score.day }}).</p>
       {% else %}
       <p class="big">No estimate</p>
       <p>FIRST hasn't scored it, which usually means it's very new.</p>
@@ -82,7 +82,7 @@
       <h2>Is it already being used?</h2>
       {% if kev %}
       <p class="big">Yes</p>
-      <p>CISA has seen it exploited in real attacks{% if kev.due %}. For US government agencies the fix is {{ kev.due }} ({{ kev.due_date }}){% endif %}.</p>
+      <p>{{ ui.term("kev", "CISA") }} has seen it exploited in real attacks{% if kev.due %}. For US government agencies the fix is {{ kev.due }} ({{ kev.due_date }}){% endif %}.</p>
       {% else %}
       <p class="big">Not confirmed</p>
       <p>It isn't on CISA's list. That doesn't prove nobody uses it: CISA only lists exploitation it has confirmed.</p>

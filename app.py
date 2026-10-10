@@ -49,6 +49,7 @@ app = Flask(__name__)
 app.config["SECRET_KEY"] = load_secret()
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024     # forms only; nothing big is ever posted
 app.jinja_env.filters["country"] = lambda cc: briefing.NAMES.get(cc, cc)   # "AE" -> "United Arab Emirates"
+app.jinja_env.filters["glossed"] = briefing.glossed                         # marks a reason's term
 FORM_SIGNER = URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="event-form")
 FORM_MAX_AGE = 2 * 3600       # a form left open longer than this has to be reloaded
 FORM_MIN_SECONDS = 3          # people take longer than this to fill it in; bots often don't
@@ -202,6 +203,7 @@ def inject_page_basics():
         "csp_nonce": g.get("csp_nonce", ""),
         "site_nav": briefing.NAV,
         "site_footer": briefing.FOOTER,
+        "site_glossary": briefing.GLOSSARY,
         "site_today": datetime.now(briefing.DUBAI),
         "site_collected": collected,
         "site_updated": last_updated(),

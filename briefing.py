@@ -101,6 +101,46 @@ NAV = [
 ]
 
 
+# ---------- Glossary ----------
+
+# One line each, shown when someone clicks a dotted-underlined term (templates: ui.term).
+GLOSSARY = {
+    "cve": ("CVE", "a public ID for one security flaw, like CVE-2021-44228, so everyone can refer to the same bug."),
+    "cvss": ("CVSS", "a score out of 10 for how much damage a flaw could do if it's used. It says nothing about "
+                     "whether anyone is using it."),
+    "epss": ("EPSS", "FIRST's daily estimate of the chance a flaw is exploited in the next 30 days, worked out from "
+                     "real attack data."),
+    "kev": ("KEV", "CISA's Known Exploited Vulnerabilities list: flaws the US cyber agency has confirmed are being "
+                   "used in real attacks. If you run one, patch it first."),
+    "zero-day": ("Zero-day", "a flaw attackers use before a fix exists, so defenders have had zero days to patch."),
+    "rce": ("Remote code execution", "a flaw that lets an attacker run their own code on a machine over the network. "
+                                     "Usually the most serious kind."),
+    "ransomware": ("Ransomware", "malware that locks or steals an organisation's data and demands payment to unlock "
+                                 "it or not leak it."),
+    "hash": ("Hash", "a fixed-length fingerprint worked out from data. The same input always gives the same hash, "
+                     "but the hash can't be turned back into the input."),
+    "sec-8k": ("Form 8-K, Item 1.05", "since December 2023, a US-listed company must report a material cyber "
+                                      "incident to the SEC within four business days of deciding it's material."),
+}
+# Plain-word reasons (see plain_reason) that start with a glossary term.
+_REASON_TERMS = [
+    (re.compile(r"^(Zero-days?)"), "zero-day"),
+    (re.compile(r"^(Remote code execution)"), "rce"),
+    (re.compile(r"^(Ransomware)"), "ransomware"),
+    (re.compile(r"^(Rated [\d.]+ out of 10)"), "cvss"),
+    (re.compile(r"^(CISA says it's being exploited)"), "kev"),
+]
+
+
+def glossed(reason):
+    """A reason with its leading term marked for the glossary, e.g. <span class="term" ...>Zero-day</span>."""
+    for pattern, key in _REASON_TERMS:
+        m = pattern.match(reason or "")
+        if m:
+            return Markup('<span class="term" data-term="{}">{}</span>').format(key, m.group(1)) + reason[m.end():]
+    return reason or ""
+
+
 # ---------- Plainer words ----------
 
 MS_KINDS = ("Remote Code Execution", "Elevation of Privilege", "Information Disclosure",

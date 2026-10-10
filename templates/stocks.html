@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
 {% set active = "stocks" %}
 
 {% block title %}Stock impact · SentryFeed{% endblock %}
@@ -308,7 +309,7 @@
       {% endif %}
     </section>
 
-    <p class="credit">Companies and breach filings from the <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener noreferrer">SEC's EDGAR</a>; daily closing prices from <a href="https://www.alphavantage.co" target="_blank" rel="noopener noreferrer">Alpha Vantage</a>. Since December 2023, US-listed companies must file an 8-K under Item 1.05 within four business days of deciding a cyber incident is material. Not financial advice.</p>
+    <p class="credit">Companies and breach filings from the <a href="https://www.sec.gov/edgar/search/" target="_blank" rel="noopener noreferrer">SEC's EDGAR</a>; daily closing prices from <a href="https://www.alphavantage.co" target="_blank" rel="noopener noreferrer">Alpha Vantage</a>. Since December 2023, US-listed companies must file an {{ ui.term("sec-8k", "8-K under Item 1.05") }} within four business days of deciding a cyber incident is material. Not financial advice.</p>
   </div>
 </main>
 {% endblock %}
