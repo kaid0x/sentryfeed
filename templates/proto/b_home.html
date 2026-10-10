@@ -22,7 +22,7 @@
 <{{ tag }} class="{{ cls }}">{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.title }}</a>{% else %}{{ s.title }}{% endif %}</{{ tag }}>
 {% endmacro %}
 
-{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {% if s.kev %}On CISA's exploited list. {% endif %}{% if s.severity_reason and not s.severity_reason.startswith("no severity") %}{{ s.severity_reason }}{% endif %}</p>{% endmacro %}
+{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {% if s.kev %}On CISA's exploited list.{% elif s.severity_reason and not s.severity_reason.startswith("no severity") %}{{ s.severity_reason }}{% endif %}</p>{% endmacro %}
 
 {% block styles %}
 <style nonce="{{ csp_nonce }}">

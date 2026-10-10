@@ -180,7 +180,7 @@
         <span class="q-age">{{ s.age }}</span>
         <ul class="why" aria-label="Why it's here">
           {% if s.kev %}<li class="kev">CISA exploited list</li>{% endif %}
-          {% if s.severity_reason and not s.severity_reason.startswith("no severity") %}<li>{{ s.severity_reason }}</li>{% endif %}
+          {% if s.severity_reason and not s.severity_reason.startswith(("no severity", "CISA")) %}<li>{{ s.severity_reason }}</li>{% endif %}
           <li>{{ s.source }}{% if s.also %} + {{ s.also|length }} more{% endif %}</li>
           {% for cve in s.cves[:2] %}<li class="cve">{{ cve }}</li>{% endfor %}
           {% if s.where %}<li>{{ s.where | map("country") | join(", ") }}</li>{% endif %}
