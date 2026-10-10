@@ -1,0 +1,88 @@
+{% import "proto/_ui.html" as ui with context %}
+<!doctype html>
+<html lang="en">
+<head>
+{{ ui.head(page_title) }}
+<style nonce="{{ csp_nonce }}">
+  /* A, Watch floor. Cool instrument greys so the severity colours are the only warm thing on screen:
+     on a second monitor, anything red or orange should catch the eye from across the room. */
+  :root, :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e1215; --panel: #151b20; --raised: #1d252c; --line: #29333c; --text: #e5eaee; --muted: #9aa6b0;
+    --red: #ff6159; --orange: #ff9d48; --yellow: #e9c64a; --green: #4fc88d; --blue: #72adf8; --purple: #bf98f8;
+    --land: #263039; --empty: #1f272e;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #e9edf0; --panel: #ffffff; --raised: #f3f5f7; --line: #d0d7dd; --text: #10171c; --muted: #4c5862;
+    --red: #c0271f; --orange: #a14800; --yellow: #775c00; --green: #19693f; --blue: #1c57b3; --purple: #6a3db3;
+    --land: #d7dee3; --empty: #e1e6ea;
+  }
+  :root {
+    /* The system UI face: it's what IT staff read all day, and it has tabular figures for counters. */
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* Mono for CVE IDs and clock times only, where character-level reading matters. */
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); font-variant-numeric: tabular-nums; }
+  a { color: inherit; text-underline-offset: 2px; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .sev-red { --sev: var(--red); } .sev-orange { --sev: var(--orange); } .sev-yellow { --sev: var(--yellow); }
+  .sev-green { --sev: var(--green); } .sev-blue { --sev: var(--blue); }
+
+  .bar { display: flex; align-items: center; gap: 8px 20px; padding: 0 20px; min-height: 52px; background: var(--panel); border-bottom: 1px solid var(--line); position: relative; z-index: 4; }
+  .brand { font-weight: 700; font-size: 16px; text-decoration: none; margin-right: 8px; }
+  .clock { margin-left: auto; font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; }
+  .clock b { color: var(--text); font-weight: 600; }
+  .theme-toggle { background: var(--raised); border: 1px solid var(--line); border-radius: 4px; min-height: 36px; padding: 0 12px; cursor: pointer; }
+  .theme-toggle:hover { border-color: var(--muted); }
+
+  .menus-row { list-style: none; margin: 0; padding: 0; display: flex; gap: 2px; }
+  .menus-row > li { position: relative; }
+  .menu-home, .menu-button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 10px; background: none; border: 0; border-radius: 4px; cursor: pointer; text-decoration: none; font-weight: 500; color: var(--muted); }
+  .menu-home:hover, .menu-button:hover, .menu-button[aria-expanded="true"] { color: var(--text); background: var(--raised); }
+  .menu-home[aria-current="page"] { color: var(--text); }
+  .menu-button::after { content: ""; width: 5px; height: 5px; margin-left: 7px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); }
+  .menu-panel { position: absolute; top: calc(100% + 4px); left: 0; min-width: 250px; list-style: none; margin: 0; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 12px 28px rgb(0 0 0 / 0.28); } /* the only shadow: menus float over the panels */
+  .menu-panel a, .menu-panel .planned, .menu-all a, .menu-all .planned { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 4px; text-decoration: none; }
+  .menu-panel a:hover, .menu-all a:hover { background: var(--raised); }
+  .planned { color: var(--muted); }
+  .planned-tag { font: 11.5px var(--mono); }
+  .menu-mobile { display: none; }
+  .menu-all { position: absolute; left: 0; right: 0; top: 100%; background: var(--panel); border-bottom: 1px solid var(--line); padding: 8px 16px 16px; }
+  .menu-all > a { display: flex; }
+  .menu-all-group { font-size: 12px; font-weight: 600; color: var(--muted); margin: 14px 10px 4px; }
+  .menu-all ul { list-style: none; margin: 0; padding: 0; }
+
+  .site-footer { padding: 24px 20px 40px; }
+  .site-footer ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 24px; color: var(--muted); }
+  .site-footer a { display: inline-block; padding: 10px 0; }
+
+  @media (max-width: 860px) {
+    .bar { padding: 0 16px; flex-wrap: wrap; }
+    .menus-row { display: none; }
+    .menu-mobile { display: block; min-height: 44px; padding: 0 12px; background: var(--raised); border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+    .clock { order: 5; width: 100%; margin: 0 0 10px; white-space: normal; }
+    .site-footer { padding: 20px 16px 32px; }
+  }
+</style>
+{% block styles %}{% endblock %}
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="/proto/a">SentryFeed</a>
+  {{ ui.menus(nav, d) }}
+  <p class="clock">{% block clock %}{% endblock %}</p>
+  {{ ui.theme_button() }}
+</header>
+{% block body %}{% endblock %}
+{{ ui.footer(footer) }}
+{{ ui.chrome_script() }}
+{% block scripts %}{% endblock %}
+</body>
+</html>

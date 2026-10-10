@@ -1,0 +1,251 @@
+{% extends "proto/c_base.html" %}
+{% import "proto/_ui.html" as ui with context %}
+{% set page_title = "SentryFeed situation room (prototype C)" %}
+{% block barnote %}{% if data and data.collected %}{{ data.collected.strftime("%H:%M") }} GST · {{ data.updated }}{% endif %}{% endblock %}
+
+{% macro link_title(s) %}{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.title }}</a>{% else %}{{ s.title }}{% endif %}{% endmacro %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .room { display: grid; grid-template-columns: minmax(0, 1fr) 390px; height: calc(100vh - 52px); min-height: 560px; }
+  .theatre-wrap { position: relative; min-height: 0; }
+  .theatre { position: absolute; inset: 0; overflow: hidden; background: var(--sea); }
+  #c-map { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #c-map .country { fill: var(--land); stroke: var(--edge); stroke-width: 0.6px; vector-effect: non-scaling-stroke; }
+  #c-map .country.dot { display: none; }
+  #c-map .country.selected { stroke: var(--text); stroke-width: 2.2px; }
+  #c-map .link { fill: none; stroke: var(--purple); stroke-width: 1.6px; vector-effect: non-scaling-stroke; marker-end: url(#arrow); }
+  #c-map .link.dim { opacity: 0.15; }
+  #arrow path { fill: var(--purple); }
+  /* Blame lines draw once, from blamed to targeted, so the direction reads without a legend. */
+  @media (prefers-reduced-motion: no-preference) {
+    #c-map .link { stroke-dasharray: 1200; stroke-dashoffset: 1200; animation: draw 1.4s ease-out 0.3s forwards; }
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+  }
+
+  /* The situation box: the day's numbers, laid over the open ocean */
+  .sitrep { position: absolute; top: 16px; left: 16px; width: 300px; background: var(--panel); border: 1px solid var(--line); padding: 14px 16px; }
+  .sitrep h1 { font: 700 15px var(--cond); color: var(--muted); margin: 0 0 8px; }
+  .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+  .figures div { display: flex; flex-direction: column-reverse; }
+  .figures dt { font: 500 13.5px/1.2 var(--cond); color: var(--muted); }
+  .figures dd { margin: 0; font: 700 40px/1 var(--cond); }
+  .figures .hot dd { color: var(--red); }
+  .coverage { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+  .coverage b { color: var(--text); font-family: var(--cond); font-size: 15px; }
+  #stack-out { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 13px; }
+  #stack-out p { margin: 0; }
+  .stack-count { font: 700 17px var(--cond); color: var(--blue); }
+  .stack-list { list-style: none; margin: 6px 0 0; padding: 0; }
+  .stack-item { display: grid; padding: 4px 0; }
+  .stack-products { font: 600 13px var(--cond); color: var(--sev); }
+  .stack-age { color: var(--muted); font-size: 12px; }
+
+  .controls { position: absolute; left: 16px; bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .views { display: flex; border: 1px solid var(--line); background: var(--panel); }
+  .views button { border: 0; background: none; min-height: 40px; padding: 0 16px; cursor: pointer; font: 600 15px var(--cond); color: var(--muted); }
+  .views button[aria-pressed="true"] { background: var(--text); color: var(--panel); }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 14px; list-style: none; margin: 0; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); font: 500 14px var(--cond); color: var(--muted); }
+  .key li { display: flex; align-items: center; gap: 6px; }
+  .sw { width: 12px; height: 12px; background: var(--sev); }
+  .sw.blame { background: none; border: 2px solid var(--purple); }
+  .sw.line { height: 2px; background: var(--purple); }
+
+  /* Side panel */
+  .side { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; }
+  .block { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+  .block h2 { font: 700 17px var(--cond); margin: 0 0 10px; display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .block h2 .note, .block h2 a { font: 500 14px var(--cond); color: var(--muted); }
+  .clist { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+  .clist button { width: 100%; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; background: var(--raised); border: 1px solid transparent; cursor: pointer; text-align: left; }
+  .clist button:hover { border-color: var(--line); }
+  .clist button[aria-pressed="true"] { border-color: var(--text); }
+  .clist .sw { flex: none; }
+  .clist .cname { flex: 1; min-width: 0; font: 600 14.5px/1.15 var(--cond); }
+  .clist .cnum { font: 700 16px var(--cond); }
+  .clist .cblame { font: 600 13px var(--cond); color: var(--purple); }
+  .slist { list-style: none; margin: 0; padding: 0; }
+  .slist li { padding: 9px 0; border-top: 1px solid var(--line); }
+  .slist li:first-child { border-top: 0; padding-top: 0; }
+  .slist .sev-word { font: 700 14px var(--cond); color: var(--sev); margin-right: 6px; }
+  .slist a { text-decoration: none; } .slist a:hover { text-decoration: underline; }
+  .slist .meta { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .slist .meta .blamed { color: var(--purple); }
+  .clear { background: none; border: 0; padding: 0; min-height: 0; font: 500 14px var(--cond); color: var(--muted); text-decoration: underline; cursor: pointer; }
+  .empty { color: var(--muted); margin: 0; }
+  .empty a { color: var(--text); }
+  .compact p { margin: 0 0 6px; }
+  .down { color: var(--red); } .up { color: var(--green); }
+  .error-box { padding: 48px 24px; max-width: 640px; }
+
+  @media (max-width: 960px) {
+    .room { display: block; height: auto; min-height: 0; }
+    .theatre-wrap { display: flex; flex-direction: column-reverse; }
+    .theatre { position: relative; height: 62vw; min-height: 240px; max-height: 70vh; }
+    .sitrep { position: static; width: auto; border-width: 0 0 1px; }
+    .side { border-left: 0; }
+    .controls { left: 8px; bottom: 8px; }
+    .key { display: none; }
+  }
+</style>
+{% if data %}{{ ui.map_fills("#c-map", data.map) }}
+<style nonce="{{ csp_nonce }}">
+{% for co in data.map.index %}#c-map [data-cc="{{ co.cc }}"] { cursor: pointer; }
+{% endfor %}
+</style>{% endif %}
+{% endblock %}
+
+{% block body %}
+{% if error %}
+<main class="error-box">
+  <h1>Can't read the database</h1>
+  <p class="empty">SentryFeed couldn't open its database ({{ error }}). The collector may be part-way through a run; reload in a minute.</p>
+</main>
+{% else %}
+{% set c = data.counts %}
+<main class="room">
+  <div class="theatre-wrap">
+  <section class="theatre" aria-label="Map">
+    <svg id="c-map" viewBox="0 20 960 340" preserveAspectRatio="xMaxYMid meet" role="group" aria-label="World map of this week's stories. Use the country list to explore it by keyboard.">
+      <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z"/></marker></defs>
+      {{ world }}
+      {% for l in data.map.lines %}<path class="link" data-from="{{ l.from }}" data-to="{{ l.to }}" d="{{ l.path }}"/>{% endfor %}
+    </svg>
+    <div class="controls">
+      <div class="views" role="group" aria-label="Map view">
+        <button type="button" data-view="0 20 960 340" aria-pressed="true">World</button>
+        <button type="button" data-view="540 104 170 116" aria-pressed="false">Gulf</button>
+      </div>
+      <ul class="key" aria-label="Key">
+        <li class="sev-red"><span class="sw"></span>Major</li><li class="sev-orange"><span class="sw"></span>Medium</li><li class="sev-yellow"><span class="sw"></span>Low</li>
+        <li><span class="sw blame"></span>Blamed</li><li><span class="sw line"></span>Blamed to targeted</li>
+      </ul>
+    </div>
+  </section>
+  <div class="sitrep">
+    <h1>Last 24 hours</h1>
+    <dl class="figures">
+      <div class="{{ 'hot' if c.major }}"><dt>Major</dt><dd>{{ c.major }}</dd></div>
+      <div><dt>CISA exploited</dt><dd>{{ c.exploited }}</dd></div>
+      <div><dt>Listed firms hit</dt><dd>{{ c.companies }}</dd></div>
+    </dl>
+    <p class="coverage">The map shows the last 7 days: <b>{{ c.placed_week }}</b> of <b>{{ c.week }}</b> security stories named a country. The rest are under "Not on the map".</p>
+    <div id="stack-out"><p class="empty">Checking your stack…</p></div>
+  </div>
+  </div>
+
+  <aside class="side">
+    <section class="block" aria-labelledby="h-countries">
+      <h2 id="h-countries">Countries <span class="note">7 days</span></h2>
+      {% if data.map.index %}
+      <ul class="clist">
+        {% for co in data.map.index %}
+        <li class="{{ 'sev-' ~ co.worst if co.worst }}"><button type="button" data-cc="{{ co.cc }}" aria-pressed="false">
+          {% if co.worst %}<span class="sw" aria-hidden="true"></span>{% else %}<span class="sw blame" aria-hidden="true"></span>{% endif %}
+          <span class="cname">{{ co.name }}</span>
+          {% if co.count %}<span class="cnum" aria-label="{{ co.count }} {{ 'story' if co.count == 1 else 'stories' }} here">{{ co.count }}</span>{% endif %}
+          {% if co.blamed %}<span class="cblame" aria-label="blamed in {{ co.blamed }}">blamed {{ co.blamed }}</span>{% endif %}
+        </button></li>
+        {% endfor %}
+      </ul>
+      {% else %}<p class="empty">No security story this week named a country.</p>{% endif %}
+    </section>
+
+    <section class="block" aria-labelledby="h-stories">
+      <h2 id="h-stories"><span id="stories-title">On the map</span> <button type="button" class="clear" id="clear" hidden>Show all</button></h2>
+      <ul class="slist" id="stories" aria-live="polite">
+        {% for s in data.placed %}
+        <li class="sev-{{ s.severity }}" data-where="{{ s.where | join(' ') }}" data-blamed="{{ s.blamed | join(' ') }}">
+          <span class="sev-word">{{ ui.sev_word(s.severity) }}</span>{{ link_title(s) }}
+          <span class="meta">{{ s.source }}{% if s.also %} + {{ s.also|length }}{% endif %} · {{ s.age }}{% if s.where %} · {{ s.where | map("country") | join(", ") }}{% endif %}{% if s.blamed %} · <span class="blamed">blamed: {{ s.blamed | map("country") | join(", ") }}</span>{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if not data.placed %}<p class="empty">Nothing to show on the map this week.</p>{% endif %}
+    </section>
+
+    <section class="block" aria-labelledby="h-unplaced">
+      <h2 id="h-unplaced">Not on the map <span class="note">most important, 7 days</span></h2>
+      {% if data.unplaced %}
+      <ul class="slist">
+        {% for s in data.unplaced %}
+        <li class="sev-{{ s.severity }}"><span class="sev-word">{{ ui.sev_word(s.severity) }}</span>{{ link_title(s) }}<span class="meta">{{ s.source }} · {{ s.age }}</span></li>
+        {% endfor %}
+      </ul>
+      {% elif c.week %}<p class="empty">Every security story this week named a country.</p>
+      {% else %}<p class="empty">No security stories in the last 7 days.</p>{% endif %}
+    </section>
+
+    <section class="block compact" aria-labelledby="h-more">
+      <h2 id="h-more">Markets and events</h2>
+      {% if data.markets %}{% for m in data.markets %}<p><strong>{{ m.company }}</strong> {{ m.display_ticker }}: {% if m.no_prices %}no price data{% elif m.change is none %}waiting for prices{% else %}<span class="{{ 'down' if m.change < 0 else 'up' }}">{{ "%+.1f%%" | format(m.change * 100) }}</span>{% endif %}</p>{% endfor %}
+      {% else %}<p class="empty">No listed company named as a breach victim in 30 days. <a href="/stocks">Stocks</a></p>{% endif %}
+      {% if data.events %}{% for e in data.events %}<p>{% if e.url %}<a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}, {{ e.when }}</p>{% endfor %}
+      {% else %}<p class="empty">No events listed. <a href="/events/submit">Submit one</a></p>{% endif %}
+    </section>
+  </aside>
+</main>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if data %}
+{{ ui.stack_script(data, 2) }}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const map = document.getElementById("c-map");
+  const buttons = Array.from(document.querySelectorAll(".clist button"));
+  const stories = Array.from(document.querySelectorAll("#stories li"));
+  const lines = Array.from(map.querySelectorAll(".link"));
+  const title = document.getElementById("stories-title");
+  const clear = document.getElementById("clear");
+  const known = new Set(buttons.map((b) => b.dataset.cc));
+  let selected = null;
+
+  function select(cc) {
+    selected = cc === selected ? null : cc;
+    map.querySelectorAll(".country.selected").forEach((el) => el.classList.remove("selected"));
+    buttons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cc === selected)));
+    let shown = 0;
+    stories.forEach((li) => {
+      const match = !selected || li.dataset.where.split(" ").includes(selected) || li.dataset.blamed.split(" ").includes(selected);
+      li.hidden = !match;
+      if (match) shown += 1;
+    });
+    lines.forEach((l) => l.classList.toggle("dim", !!selected && l.dataset.from !== selected && l.dataset.to !== selected));
+    if (selected) {
+      map.querySelectorAll('[data-cc="' + selected + '"]').forEach((el) => el.classList.add("selected"));
+      const name = buttons.find((b) => b.dataset.cc === selected).querySelector(".cname").textContent;
+      title.textContent = name + " (" + shown + ")";
+    } else {
+      title.textContent = "On the map";
+    }
+    clear.hidden = !selected;
+  }
+  buttons.forEach((b) => b.addEventListener("click", () => select(b.dataset.cc)));
+  clear.addEventListener("click", () => { const was = selected; select(selected); const b = buttons.find((x) => x.dataset.cc === was); if (b) b.focus(); });
+  map.addEventListener("click", (e) => {
+    const cc = e.target.getAttribute && e.target.getAttribute("data-cc");
+    if (cc && known.has(cc)) select(cc);
+  });
+
+  // World and Gulf views: the viewBox glides between them so you keep your bearings.
+  const views = Array.from(document.querySelectorAll(".views button"));
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const parse = (v) => v.split(" ").map(Number);
+  views.forEach((b) => b.addEventListener("click", () => {
+    views.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    const from = parse(map.getAttribute("viewBox")), to = parse(b.dataset.view);
+    if (still || document.hidden) { map.setAttribute("viewBox", b.dataset.view); return; }
+    const start = performance.now(), length = 450;
+    function step(now) {
+      const t = Math.min(1, (now - start) / length), e = 1 - Math.pow(1 - t, 3);
+      map.setAttribute("viewBox", from.map((f, i) => (f + (to[i] - f) * e).toFixed(2)).join(" "));
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }));
+})();
+</script>
+{% endif %}
+{% endblock %}

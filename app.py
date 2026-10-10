@@ -1,6 +1,7 @@
 import os
 import re
 import secrets
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -386,6 +387,10 @@ def pwned_range(prefix):
     resp = Response(upstream.text, mimetype="text/plain")
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+import proto  # noqa: E402  (redesign branch only)
+proto.register(app, sys.modules[__name__])
 
 
 if __name__ == "__main__":

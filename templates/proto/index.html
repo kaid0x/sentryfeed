@@ -1,0 +1,58 @@
+{% import "proto/_ui.html" as ui with context %}
+<!doctype html>
+<html lang="en">
+<head>
+{{ ui.head("SentryFeed redesign prototypes") }}
+<style nonce="{{ csp_nonce }}">
+  /* A plain index on purpose: it shouldn't favour any of the three directions. */
+  :root, :root[data-theme="dark"] { color-scheme: dark; --bg: #121212; --text: #ececec; --muted: #a8a8a8; --line: #333; }
+  :root[data-theme="light"] { color-scheme: light; --bg: #fafafa; --text: #161616; --muted: #555; --line: #d8d8d8; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .muted { color: var(--muted); }
+  .top { display: flex; justify-content: space-between; align-items: start; gap: 16px; }
+  .theme-toggle { background: none; border: 1px solid var(--line); border-radius: 4px; min-height: 40px; padding: 0 14px; cursor: pointer; font: inherit; color: inherit; }
+  ol { list-style: none; margin: 32px 0 0; padding: 0; }
+  li { border-top: 1px solid var(--line); padding: 20px 0; }
+  h2 { font-size: 20px; margin: 0 0 6px; }
+  .links { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 10px 0 0; }
+  .links a { display: inline-block; padding: 8px 0; font-weight: 600; }
+  .dials { font-size: 14px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Redesign prototypes</h1>
+      <p class="muted">Three directions, built on the same real data from this server's database. Each has a home page and one tool page (the password check), and each works on a phone. Links inside them lead to the current site's pages.</p>
+    </div>
+    {{ ui.theme_button() }}
+  </div>
+  <ol>
+    <li>
+      <h2>A. Watch floor</h2>
+      <p>An operations dashboard built around one question: what needs attention now. A ranked queue with the reason for each item, the last 24 hours hour by hour, then the supporting panels.</p>
+      <p class="dials">Cool greys so severity is the only warm colour. ENERGY 2, RHYTHM 2, MOTION 1.</p>
+      <p class="links"><a href="/proto/a">Home</a><a href="/proto/a/password">Password check</a></p>
+    </li>
+    <li>
+      <h2>B. The Briefing</h2>
+      <p>A front page for cyber: the day in one sentence, one lead story, then sections for exploited flaws, the Gulf, markets and the week.</p>
+      <p class="dials">Serif headlines on warm paper; severity as coloured kickers. ENERGY 2, RHYTHM 3, MOTION 1.</p>
+      <p class="links"><a href="/proto/b">Home</a><a href="/proto/b/password">Password check</a></p>
+    </li>
+    <li>
+      <h2>C. Situation room</h2>
+      <p>The map is the page: pick a country to see its stories, switch between the world and the Gulf, and see plainly how many stories have no country.</p>
+      <p class="dials">Chart colours and condensed labels. ENERGY 3, RHYTHM 2, MOTION 2.</p>
+      <p class="links"><a href="/proto/c">Home</a><a href="/proto/c/password">Password check</a></p>
+    </li>
+  </ol>
+</main>
+{{ ui.chrome_script() }}
+</body>
+</html>

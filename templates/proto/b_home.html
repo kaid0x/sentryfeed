@@ -1,0 +1,292 @@
+{% extends "proto/b_base.html" %}
+{% import "proto/_ui.html" as ui with context %}
+{% set page_title = "SentryFeed: today's briefing (prototype B)" %}
+{% set now_iso = data.now.isoformat() if data else "" %}
+{% block dateline %}{% if data %}{{ data.now.strftime("%A %-d %B %Y") }}{% endif %}{% endblock %}
+{% block updated %}{% if data and data.collected %}Updated {{ data.collected.strftime("%H:%M") }} Dubai time ({{ data.updated }}){% endif %}{% endblock %}
+
+{% macro words(n, one, many) %}{% if n == 0 %}no {{ many }}{% else %}{{ n }} {{ one if n == 1 else many }}{% endif %}{% endmacro %}
+
+{% macro meta(s, long=false) %}
+<p class="meta">
+  <span>{{ s.source }}</span><span>{{ s.age }}</span>
+  {% if s.also %}<span>{{ ui.plural(s.also|length, "more outlet", "more outlets") }}</span>{% endif %}
+  {% if s.where %}<span>In {{ s.where | map("country") | join(", ") }}</span>{% endif %}
+  {% if s.blamed %}<span class="blamed">Blamed: {{ s.blamed | map("country") | join(", ") }}</span>{% endif %}
+  {% if long and s.stock %}<span>{{ s.stock.company }} ({{ s.stock.display_ticker }}) is listed</span>{% endif %}
+</p>
+{% if s.cves %}<p class="cves">{% for c in s.cves[:4] %}<a href="https://nvd.nist.gov/vuln/detail/{{ c }}" rel="noopener noreferrer">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
+{% endmacro %}
+
+{% macro headline(s, tag="h3", cls="") %}
+<{{ tag }} class="{{ cls }}">{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.title }}</a>{% else %}{{ s.title }}{% endif %}</{{ tag }}>
+{% endmacro %}
+
+{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {% if s.kev %}On CISA's exploited list. {% endif %}{% if s.severity_reason and not s.severity_reason.startswith("no severity") %}{{ s.severity_reason }}{% endif %}</p>{% endmacro %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .topline { font: 400 clamp(24px, 3.4vw, 36px)/1.25 var(--serif); letter-spacing: -0.01em; margin: 36px auto 0; max-width: 900px; text-align: center; text-wrap: balance; }
+  .topline b { font-weight: 700; }
+  .topline .n-major { color: var(--red); }
+  .topline-note { text-align: center; color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+
+  .stack-strip { margin: 28px auto 0; max-width: 900px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 12px 0; font-size: 15px; text-align: center; }
+  .stack-strip p { margin: 0; }
+  .stack-count { font: 700 18px var(--serif); }
+  .stack-list { list-style: none; margin: 10px 0 0; padding: 0; text-align: left; }
+  .stack-item { display: grid; grid-template-columns: 160px 1fr auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--rule); }
+  .stack-products { color: var(--sev); font-weight: 600; }
+  .stack-age { color: var(--muted); font-size: 14px; }
+  .stack-more { display: inline-block; margin-top: 8px; }
+
+  /* Front page: one lead, then a column of the next most important */
+  .front { display: grid; grid-template-columns: 7fr 4fr; gap: 0 48px; margin-top: 40px; }
+  .lead-story { border-right: 1px solid var(--rule); padding-right: 48px; }
+  .kicker { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+  .kicker strong { color: var(--sev); font: 700 15px var(--serif); }
+  .lead-head { font: 700 clamp(30px, 4.2vw, 50px)/1.08 var(--serif); letter-spacing: -0.015em; margin: 0 0 16px; text-wrap: balance; }
+  .lead-head a, .side-head a, .list-head a { text-decoration: none; }
+  .lead-head a:hover, .side-head a:hover, .list-head a:hover { text-decoration: underline; }
+  .summary { font: 19px/1.55 var(--serif); margin: 0 0 14px; max-width: 62ch; }
+  .meta { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 14px; color: var(--muted); margin: 0; }
+  .meta .blamed { color: var(--purple); }
+  .cves { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font: 13px var(--mono); }
+  .cves span { font-family: var(--sans); color: var(--muted); }
+  .side { display: flex; flex-direction: column; }
+  .side article { padding: 0 0 18px; margin-bottom: 18px; border-bottom: 1px solid var(--rule); }
+  .side article:last-child { border-bottom: 0; }
+  .side-head { font: 700 21px/1.22 var(--serif); margin: 0 0 8px; }
+  .more-link { display: inline-block; font-weight: 600; padding: 10px 0; }
+
+  /* Sections: a heavy rule and a serif title, the way a paper opens a new page */
+  .section { margin-top: 56px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 18px; }
+  .section h2 { font: 700 26px/1.2 var(--serif); margin: 0; }
+  .section-note { color: var(--muted); font-size: 14px; margin: 0; max-width: 60ch; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); margin: 0; max-width: 60ch; }
+  .empty a { color: var(--ink); }
+
+  .numbered { list-style: none; margin: 0; padding: 0; counter-reset: n; columns: 2; column-gap: 48px; }
+  .numbered li { break-inside: avoid; counter-increment: n; display: grid; grid-template-columns: 34px 1fr; padding: 0 0 18px; }
+  .numbered li::before { content: counter(n); font: 700 26px/1 var(--serif); color: var(--sev); }
+  .list-head { font: 700 19px/1.25 var(--serif); margin: 0 0 6px; }
+
+  .gulf { display: grid; grid-template-columns: 5fr 7fr; gap: 40px; align-items: start; }
+  .gulf-list { list-style: none; margin: 0; padding: 0; }
+  .gulf-list li { padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--rule); }
+  .gulf-list li:last-child { border-bottom: 0; }
+  figure { margin: 0; }
+  figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .bmap { display: block; width: 100%; height: auto; background: var(--raised); }
+  .world-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+  #world-shapes .country { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
+  #world-shapes .country.dot { display: none; }
+  .bmap .gulf-label { font: 600 4px var(--sans); fill: var(--ink); }
+  .bmap .link { fill: none; stroke: var(--purple); stroke-width: 1.2; }
+
+  .markets { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .markets th { text-align: left; font-weight: 600; font-size: 13px; color: var(--muted); padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule); }
+  .markets td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .markets .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .down { color: var(--red); } .up { color: var(--green); }
+
+  .week { display: grid; grid-template-columns: 5fr 4fr 3fr; gap: 40px; }
+  .week h3 { font: 700 18px var(--serif); margin: 0 0 10px; }
+  .country-counts { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 14px; }
+  .country-counts b { font-variant-numeric: tabular-nums; }
+  .events { list-style: none; margin: 0; padding: 0; }
+  .events li { display: grid; grid-template-columns: 48px 1fr; gap: 12px; padding: 0 0 12px; }
+  .events .day { font: 700 26px/1 var(--serif); text-align: center; }
+  .events .month { display: block; font: 600 12px var(--sans); color: var(--muted); }
+  .events .where { display: block; font-size: 14px; color: var(--muted); }
+  .planned-box p { margin: 0 0 8px; font-size: 15px; }
+  .planned-box .label { font: italic 14px var(--serif); color: var(--muted); }
+
+  .continue { margin-top: 56px; text-align: center; font: 22px var(--serif); }
+  .error-box { margin: 48px auto; max-width: 640px; text-align: center; }
+
+  @media (max-width: 900px) {
+    .front, .gulf, .week { grid-template-columns: 1fr; gap: 28px; }
+    .lead-story { border-right: 0; padding-right: 0; border-bottom: 1px solid var(--rule); padding-bottom: 24px; }
+    .numbered { columns: 1; }
+  }
+  @media (max-width: 560px) {
+    .topline { margin-top: 24px; }
+    .stack-item { grid-template-columns: 1fr auto; }
+    .stack-products { grid-column: 1 / -1; }
+    .summary { font-size: 17px; }
+    .markets .story-col { display: none; }
+  }
+</style>
+{% if data %}{{ ui.map_fills("#world-shapes", data.map) }}{% endif %}
+{% endblock %}
+
+{% block body %}
+<main>
+{% if error %}
+  <div class="error-box">
+    <h1 class="topline">The briefing couldn't be put together.</h1>
+    <p class="empty">SentryFeed couldn't read its database ({{ error }}). The collector may be part-way through a run; reload in a minute. If it keeps happening, check <code>journalctl -u sentryfeed-collect</code> on the Pi.</p>
+  </div>
+{% else %}
+  {% set c = data.counts %}
+  <h1 class="topline">In the last 24 hours: <b class="{{ 'n-major' if c.major }}">{{ words(c.major, "Major incident", "Major incidents") }}</b>,
+    <b>{{ words(c.exploited, "story", "stories") }}</b> about flaws on CISA's exploited list, and
+    <b>{{ words(c.companies, "breached listed company", "breached listed companies") }}</b>.</h1>
+  <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.</p>
+
+  <section class="stack-strip" aria-label="Your stack">
+    <div id="stack-out"><p>Checking your stack…</p></div>
+    <noscript><p>Your stack is kept in this browser, so it needs JavaScript. <a href="/stack">Open My stack</a>.</p></noscript>
+  </section>
+
+  {# The country shapes, defined once and drawn by both maps below with <use>. #}
+  <svg class="world-defs" aria-hidden="true" focusable="false"><defs><g id="world-shapes">{{ world }}</g></defs></svg>
+
+  <h2 class="sr-only">Top stories</h2>
+  {% if data.top %}
+  {% set lead = data.top[0] %}
+  <div class="front">
+    <article class="lead-story sev-{{ lead.severity }}">
+      {{ kicker(lead) }}
+      {{ headline(lead, "h3", "lead-head") }}
+      {% if lead.summary %}<p class="summary">{{ lead.summary | truncate(320) }}</p>{% endif %}
+      {{ meta(lead, true) }}
+    </article>
+    <div class="side">
+      {% for s in data.top[1:] %}
+      <article class="sev-{{ s.severity }}">
+        {{ kicker(s) }}
+        {{ headline(s, "h3", "side-head") }}
+        {{ meta(s) }}
+      </article>
+      {% endfor %}
+      <a class="more-link" href="/?days=1">All {{ c.day }} stories from the last 24 hours</a>
+    </div>
+  </div>
+  {% else %}
+  <p class="empty">A quiet day: nothing scored Major, Medium or Low in the last 24 hours. <a href="/?days=3">See the last 3 days in the feed</a>.</p>
+  {% endif %}
+
+  <section class="section" aria-labelledby="h-exploited">
+    <div class="section-head">
+      <h2 id="h-exploited">Being exploited now</h2>
+      <p class="section-note">Last 7 days. Flaws on CISA's Known Exploited Vulnerabilities list, or that the story says are already being used.</p>
+    </div>
+    {% if data.exploited %}
+    <ol class="numbered">
+      {% for s in data.exploited %}
+      <li class="sev-{{ s.severity }}"><div>
+        {{ headline(s, "h3", "list-head") }}
+        {{ meta(s) }}
+      </div></li>
+      {% endfor %}
+    </ol>
+    {% else %}
+    <p class="empty">No story in the last 7 days was about a flaw known to be exploited.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="h-gulf">
+    <div class="section-head">
+      <h2 id="h-gulf">In the Gulf</h2>
+      <p class="section-note">Last 7 days. Stories from The National, Tahawultech and Security Middle East, plus any story naming a GCC country.</p>
+    </div>
+    <div class="gulf">
+      <figure>
+        <svg class="bmap gulf-map" viewBox="548 112 150 100" role="img" aria-label="Map of the Gulf. {% set gcc = data.map.countries | selectattr('cc', 'in', ['AE','SA','QA','KW','BH','OM']) | list %}{% if gcc %}Countries with stories: {% for g in gcc %}{{ g.name }} ({{ g.count }}){{ ', ' if not loop.last }}{% endfor %}.{% else %}No GCC country named in a story this week.{% endif %}">
+          <use href="#world-shapes"/>
+          {# Bahrain and Qatar sit too close to label both, so their labels are nudged apart. #}
+          {% for cc, dx, dy in [("AE", 4, 2), ("SA", 0, 0), ("OM", 0, 0), ("KW", 0, -2), ("QA", -3, 5), ("BH", -5, -2)] %}{% set p = centres[cc] %}<text class="gulf-label" x="{{ p[0] + dx }}" y="{{ p[1] + dy }}" text-anchor="middle">{{ cc }}</text>{% endfor %}
+        </svg>
+        <figcaption>{% if gcc %}Shaded by the most serious story naming each country.{% else %}No GCC country was named in a story this week, so nothing is shaded.{% endif %}</figcaption>
+      </figure>
+      {% if data.gulf %}
+      <ul class="gulf-list">
+        {% for s in data.gulf %}
+        <li class="sev-{{ s.severity }}">{{ kicker(s) }}{{ headline(s, "h3", "list-head") }}{{ meta(s) }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="empty">No Gulf stories in the last 7 days. The regional sources publish less often, and only their cybersecurity stories are kept.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-markets">
+    <div class="section-head">
+      <h2 id="h-markets">Markets</h2>
+      <p class="section-note">Listed companies named as breach victims in the last {{ 30 }} days, and how their shares moved against their market.</p>
+    </div>
+    {% if data.markets %}
+    <table class="markets">
+      <thead><tr><th scope="col">Company</th><th scope="col">Market</th><th scope="col" class="story-col">Story</th><th scope="col" class="num">Shares</th><th scope="col" class="num">Market</th></tr></thead>
+      <tbody>
+      {% for m in data.markets %}
+      <tr>
+        <td><strong>{{ m.company }}</strong> {{ m.display_ticker }}</td>
+        <td>{{ m.exchange_label }}</td>
+        <td class="story-col">{% if m.story.link %}<a href="{{ m.story.link }}" rel="noopener noreferrer">{{ m.story.title }}</a>{% else %}{{ m.story.title }}{% endif %}</td>
+        {% if m.no_prices %}<td class="num" colspan="2">No free price data</td>
+        {% elif m.change is none %}<td class="num" colspan="2">Waiting for prices</td>
+        {% else %}<td class="num {{ 'down' if m.change < 0 else 'up' }}">{{ "%+.1f%%" | format(m.change * 100) }}</td><td class="num">{{ "%+.1f%%" | format(m.market_change * 100) }}</td>{% endif %}
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <a class="more-link" href="/stocks">Charts and filings on the Stocks page</a>
+    {% else %}
+    <p class="empty">No breach story named a listed company in the last 30 days.{% if not data.has_sec_contact %} US companies aren't being matched on this server yet, because it has no SEC contact set.{% endif %} <a href="/stocks">Stocks page</a>.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="h-week">
+    <div class="section-head"><h2 id="h-week">This week</h2></div>
+    <div class="week">
+      <div>
+        <h3>Where it happened</h3>
+        {% if data.map.countries %}
+        <svg class="bmap" viewBox="0 -2 960 422" role="img" aria-label="World map shading {{ data.map.countries|length }} countries named in this week's stories.">
+          <use href="#world-shapes"/>
+          {% for l in data.map.lines %}<path class="link" d="{{ l.path }}"/>{% endfor %}
+        </svg>
+        <ul class="country-counts">
+          {% for co in data.map.countries[:6] %}<li>{{ co.name }} <b>{{ co.count }}</b></li>{% endfor %}
+        </ul>
+        <p class="section-note">{{ c.placed_week }} of {{ c.week }} stories this week named a country. <a href="/map?days=7">Open the map</a>.</p>
+        {% else %}
+        <p class="empty">No story this week named a country.</p>
+        {% endif %}
+      </div>
+      <div>
+        <h3>Coming up</h3>
+        {% if data.events %}
+        <ul class="events">
+          {% for e in data.events %}
+          <li><span class="day">{{ e.day }}<span class="month">{{ e.month }}</span></span>
+            <span>{% if e.url %}<a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}
+            <span class="where">{{ e.kind_label }}, {{ e.where }}, {{ e.when }}</span></span></li>
+          {% endfor %}
+        </ul>
+        <a class="more-link" href="/events">All events</a>
+        {% else %}
+        <p class="empty">No events listed yet. Running a CTF, meetup or talk? <a href="/events/submit">Submit it</a>.</p>
+        {% endif %}
+      </div>
+      <div class="planned-box">
+        <h3>Weekly digest</h3>
+        <p class="label">Planned, not built yet.</p>
+        <p>One page a week: the top Major stories, new KEV flaws, the busiest countries and market moves, compared with the week before.</p>
+      </div>
+    </div>
+  </section>
+
+  <p class="continue"><a href="/?days=1">Read all {{ c.day }} stories in the feed</a></p>
+{% endif %}
+</main>
+{% endblock %}
+
+{% block scripts %}
+{% if data %}{{ ui.stack_script(data) }}{% endif %}
+{% endblock %}

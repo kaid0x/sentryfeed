@@ -1,0 +1,215 @@
+{# Shared building blocks for the redesign prototypes. Import with context so csp_nonce is visible. #}
+
+{% macro head(title) %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{ title }}</title>
+{# Runs before the page paints, so a saved light theme never flashes dark first.
+   No saved choice: follow the device's setting, dark when it has none. #}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("sentryfeed.theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark") {
+    t = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+{% endmacro %}
+
+{% macro theme_button(cls="") %}
+<button type="button" class="theme-toggle {{ cls }}" id="theme-toggle">Theme</button>
+{% endmacro %}
+
+{# Desktop: one dropdown per group. Phones: a single "Menu" button opening every group as a list.
+   Planned pages are named but not linked, so nothing in the menu leads nowhere. #}
+{% macro menus(nav, d) %}
+<nav class="menus" aria-label="Sections">
+  <ul class="menus-row">
+    <li><a class="menu-home" href="/proto/{{ d }}">Home</a></li>
+    {% for group, links in nav %}
+    <li class="menu">
+      <button type="button" class="menu-button" aria-expanded="false" aria-controls="menu-{{ loop.index }}">{{ group }}</button>
+      <ul class="menu-panel" id="menu-{{ loop.index }}" hidden>
+        {% for label, href in links %}
+        {% if href %}<li><a href="{{ href }}">{{ label }}</a></li>
+        {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
+        {% endfor %}
+      </ul>
+    </li>
+    {% endfor %}
+  </ul>
+  <button type="button" class="menu-mobile" aria-expanded="false" aria-controls="menu-all">Menu</button>
+  <div class="menu-all" id="menu-all" hidden>
+    <a class="menu-home" href="/proto/{{ d }}">Home</a>
+    {% for group, links in nav %}
+    <h2 class="menu-all-group">{{ group }}</h2>
+    <ul>
+      {% for label, href in links %}
+      {% if href %}<li><a href="{{ href }}">{{ label }}</a></li>
+      {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
+      {% endfor %}
+    </ul>
+    {% endfor %}
+  </div>
+</nav>
+{% endmacro %}
+
+{% macro footer(links) %}
+<footer class="site-footer">
+  <ul>
+    {% for label, href in links %}<li><a href="{{ href }}" rel="noopener noreferrer">{{ label }}</a></li>{% endfor %}
+  </ul>
+</footer>
+{% endmacro %}
+
+{# Menus and the theme switch. Escape closes an open menu and returns focus to its button. #}
+{% macro chrome_script() %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const root = document.documentElement;
+  const theme = document.getElementById("theme-toggle");
+  function showTheme() {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    theme.textContent = next === "light" ? "Light" : "Dark";
+    theme.setAttribute("aria-label", "Switch to " + next + " theme");
+  }
+  if (theme) {
+    showTheme();
+    theme.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("sentryfeed.theme", next); } catch (e) { /* still switches for this page */ }
+      showTheme();
+      document.dispatchEvent(new CustomEvent("themechange"));
+    });
+  }
+
+  const buttons = Array.from(document.querySelectorAll(".menu-button, .menu-mobile"));
+  function close(button, refocus) {
+    button.setAttribute("aria-expanded", "false");
+    document.getElementById(button.getAttribute("aria-controls")).hidden = true;
+    if (refocus) button.focus();
+  }
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const open = button.getAttribute("aria-expanded") === "true";
+      buttons.forEach((b) => close(b, false));
+      if (!open) {
+        button.setAttribute("aria-expanded", "true");
+        document.getElementById(button.getAttribute("aria-controls")).hidden = false;
+      }
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const open = buttons.find((b) => b.getAttribute("aria-expanded") === "true");
+    if (open) close(open, true);
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".menus")) buttons.forEach((b) => close(b, false));
+  });
+})();
+</script>
+{% endmacro %}
+
+{# "Your stack": the saved products never leave the browser. The page already holds every
+   story from the last 14 days that names a catalogue product, and this picks the matches. #}
+{% macro stack_script(data, limit=3) %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const out = document.getElementById("stack-out");
+  if (!out) return;
+  const STORIES = {{ data.stack_stories | tojson }};
+  const NAMES = {{ data.stack_names | tojson }};
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES); }
+  catch (e) { saved = []; }
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  out.replaceChildren();
+  if (!saved.length) {
+    const p = el("p", "stack-invite");
+    const a = el("a", null, "Pick the products your company runs");
+    a.href = "/stack";
+    p.append(a, " to see stories about them here. Your list stays in this browser.");
+    out.append(p);
+    return;
+  }
+  const mine = new Set(saved);
+  const hits = STORIES.filter((s) => s.products.some((p) => mine.has(p)));
+  const head = el("p", "stack-head");
+  const count = el("strong", "stack-count", String(hits.length));
+  head.append(count, hits.length === 1 ? " story in the last 14 days about products you run" :
+                                          " stories in the last 14 days about products you run");
+  out.append(head);
+  if (!hits.length) {
+    head.append(" (" + saved.length + " saved). Nothing to act on.");
+    return;
+  }
+  const list = el("ul", "stack-list");
+  hits.slice(0, {{ limit }}).forEach((s) => {
+    const li = el("li", "stack-item sev-" + s.severity);
+    const products = s.products.filter((p) => mine.has(p)).map((p) => NAMES[p]).join(", ");
+    li.append(el("span", "stack-products", products));
+    if (s.link) {
+      const a = el("a", null, s.title);
+      a.href = s.link;
+      a.rel = "noopener noreferrer";
+      li.append(a);
+    } else {
+      li.append(el("span", null, s.title));
+    }
+    li.append(el("span", "stack-age", s.age));
+    list.append(li);
+  });
+  out.append(list);
+  if (hits.length > {{ limit }}) {
+    const more = el("a", "stack-more", "All " + hits.length + " in My stack");
+    more.href = "/stack";
+    out.append(more);
+  }
+})();
+</script>
+{% endmacro %}
+
+{# Hover or focus anything with data-readout and its text appears in the readout element,
+   so the charts work by keyboard as well as by mouse. #}
+{% macro readout_script() %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  document.querySelectorAll("[data-readout-for]").forEach((chart) => {
+    const out = document.getElementById(chart.getAttribute("data-readout-for"));
+    const resting = out.textContent;
+    chart.querySelectorAll("[data-readout]").forEach((mark) => {
+      const show = () => { out.textContent = mark.getAttribute("data-readout"); };
+      mark.addEventListener("mouseenter", show);
+      mark.addEventListener("focus", show);
+    });
+    chart.addEventListener("mouseleave", () => { if (!chart.contains(document.activeElement)) out.textContent = resting; });
+    chart.addEventListener("focusout", (e) => { if (!chart.contains(e.relatedTarget)) out.textContent = resting; });
+  });
+})();
+</script>
+{% endmacro %}
+
+{# Map fills for countries with stories, drawn server-side: one nonce'd rule per country. #}
+{% macro map_fills(scope, map) %}
+<style nonce="{{ csp_nonce }}">
+{% for c in map.countries %}{{ scope }} [data-cc="{{ c.cc }}"] { fill: var(--{{ c.worst }}); }
+{{ scope }} .dot[data-cc="{{ c.cc }}"] { display: inline; }
+{% endfor %}{% for b in map.blamed %}{{ scope }} [data-cc="{{ b.cc }}"] { stroke: var(--purple); stroke-width: 1.5px; }
+{{ scope }} .dot[data-cc="{{ b.cc }}"] { display: inline; }
+{% endfor %}
+</style>
+{% endmacro %}
+
+{% macro plural(n, one, many) %}{{ n }} {{ one if n == 1 else many }}{% endmacro %}
+
+{% macro sev_word(sev) %}{{ {"red": "Major", "orange": "Medium", "yellow": "Low", "green": "Tech & AI", "blue": "Event"}[sev] }}{% endmacro %}
