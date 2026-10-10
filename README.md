@@ -132,6 +132,17 @@ This product uses the NVD API but is not endorsed or certified by the NVD.
 
 SentryFeed relays the request instead of the browser calling Pwned Passwords directly, so visitors' IP addresses never reach HIBP and the page's security policy can forbid connections to any other site. Browsers only provide built-in hashing on HTTPS pages, so `templates/_sha1.js` is a small fallback for the Pi's plain-HTTP setup, tested against Node's SHA-1 on 5,000+ inputs.
 
+## Email header analyser
+
+`/headers` reads an email's raw headers (Gmail's "Show original", Outlook's message source) **entirely in the browser**: nothing is uploaded, and the security policy wouldn't let the page send it anywhere if it tried. It shows:
+
+- **Did it pass?** SPF, DKIM and DMARC from the topmost Authentication-Results header (the one your own mail server added; lower ones can be written by the sender), or Received-SPF. Both the usual layout and Microsoft's are understood.
+- **Warnings**, most serious first: DMARC failed, a display name that is itself a different address, replies going to another domain, SPF or DKIM failures, a different envelope sender or signing domain, and hops that didn't record encryption.
+- **Who sent it:** From, Reply-To, Return-Path, To, subject, date, Message-ID, and the sending server's IP as your server saw it, with links to check it on AbuseIPDB, VirusTotal and Shodan.
+- **The route**, oldest hop first, with the delay between hops, whether each was encrypted, and which addresses are on a private network; then the DKIM signatures and every header.
+
+It says plainly that passing checks doesn't make an email safe, only shows which domain really sent it. Two made-up examples ("a normal email", "a suspicious one") use reserved example domains and documentation-only IP addresses, so it can be tried without real mail. Pasted text is only ever shown with `textContent`.
+
 ## File & link check
 
 `/scan` builds links to [VirusTotal](https://www.virustotal.com) reports, with second opinions where they apply:

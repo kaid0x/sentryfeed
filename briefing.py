@@ -98,7 +98,7 @@ NAV = [
                ("Patch this first", "/patch", "patch"), ("Vendor track record", "/vendors", "vendors"),
                ("Ransomware stats", None, None), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
-               ("Email header analyser", None, None), ("Domain check", None, None)]),
+               ("Email header analyser", "/headers", "headers"), ("Domain check", None, None)]),
     ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
 ]
 
@@ -121,6 +121,12 @@ GLOSSARY = {
                                  "it or not leak it."),
     "rss": ("RSS", "a feed of new posts that apps like Feedly, NetNewsWire, Outlook or Slack's RSS app can follow, "
                    "so new stories come to you without visiting the site."),
+    "spf": ("SPF", "a list a domain publishes of the servers allowed to send its email. It checks the hidden "
+                   "envelope sender, not the From address you see."),
+    "dkim": ("DKIM", "a digital signature a sending domain adds to an email, so receivers can tell it wasn't "
+                     "changed and which domain vouches for it."),
+    "dmarc": ("DMARC", "a domain's rule tying SPF and DKIM to the From address you see, and saying what to do with "
+                       "email that fails. A pass means the From domain really sent it."),
     "hash": ("Hash", "a fixed-length fingerprint worked out from data. The same input always gives the same hash, "
                      "but the hash can't be turned back into the input."),
     "sec-8k": ("Form 8-K, Item 1.05", "since December 2023, a US-listed company must report a material cyber "

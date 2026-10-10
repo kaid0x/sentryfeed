@@ -778,6 +778,11 @@ def password():
     return render_template("password.html")
 
 
+@app.route("/headers")
+def headers():
+    return render_template("headers.html", active="headers")
+
+
 @app.route("/scan")
 def scan():
     return render_template("scan.html")

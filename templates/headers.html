@@ -1,0 +1,392 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Email header analyser · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .h-head { margin: 28px 0 18px; }
+  .h-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .tool { display: grid; grid-template-columns: 7fr 4fr; gap: 48px; }
+  label { display: block; font-weight: 600; margin-bottom: 6px; }
+  textarea { width: 100%; min-height: 240px; border: 2px solid var(--ink); background: var(--bg); color: var(--ink); padding: 10px 12px; font: 13px/1.5 var(--mono); resize: vertical; }
+  .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 0; }
+  .buttons button { min-height: 44px; padding: 0 18px; border: 1px solid var(--ink); background: none; font: 600 15px var(--sans); cursor: pointer; }
+  .buttons .go { background: var(--ink); color: var(--bg); border-width: 2px; }
+  .buttons button:hover { background: var(--ink); color: var(--bg); }
+  .error { color: var(--red); margin: 10px 0 0; }
+  .side { border-left: 1px solid var(--rule); padding-left: 28px; font-size: 15px; }
+  .side h2 { font: 700 20px var(--serif); margin: 0 0 10px; }
+  .side ol { padding-left: 20px; margin: 0 0 16px; }
+  .side li { margin-bottom: 8px; }
+  .side .private { border-left: 3px solid var(--blue); padding: 4px 12px; } /* the stripe marks the privacy note */
+
+  #results { margin-top: 36px; }
+  .section { margin-top: 32px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section h2 { font: 700 24px/1.2 var(--serif); margin: 0 0 10px; }
+  .checks { display: grid; grid-template-columns: repeat(3, 1fr); border-bottom: 1px solid var(--rule); }
+  .check { padding: 4px 16px 14px 0; }
+  .check + .check { border-left: 1px solid var(--rule); padding-left: 16px; }
+  .check h3 { font: 600 14px var(--sans); color: var(--muted); margin: 0 0 4px; }
+  .check .result { font: 700 28px/1.1 var(--serif); margin: 0 0 4px; text-transform: capitalize; }
+  .check p { margin: 0; font-size: 14px; }
+  .pass { color: var(--green); } .fail { color: var(--red); } .soft { color: var(--orange); } .none { color: var(--muted); }
+  .caution { margin: 14px 0 0; font-size: 15px; max-width: 72ch; }
+  .warnings { list-style: none; margin: 14px 0 0; padding: 0; }
+  .warnings li { padding: 8px 0 8px 14px; border-left: 3px solid var(--sev); margin-bottom: 6px; } /* the stripe is the warning's severity */
+  .warnings strong { color: var(--sev); }
+  dl.who { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; margin: 0; font-size: 15px; }
+  dl.who dt { font-weight: 600; color: var(--muted); }
+  dl.who dd { margin: 0; overflow-wrap: anywhere; }
+  .ip-links { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 0; font-size: 14px; }
+  .mono { font-family: var(--mono); font-size: 14px; }
+  .route { list-style: none; margin: 0; padding: 0; counter-reset: hop; }
+  .route li { counter-increment: hop; display: grid; grid-template-columns: 36px 1fr; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .route li::before { content: counter(hop); font: 700 22px/1 var(--serif); }
+  .route .hop-line { font-size: 15px; overflow-wrap: anywhere; }
+  .route .hop-meta { grid-column: 2; font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 14px; }
+  .tag-private { color: var(--blue); } .tag-plain { color: var(--orange); }
+  .sigs { list-style: none; margin: 0; padding: 0; }
+  .sigs li { padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  details summary { cursor: pointer; padding: 8px 0; font-weight: 600; }
+  table.all { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.all th, table.all td { text-align: left; vertical-align: top; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule); }
+  table.all td { font-family: var(--mono); overflow-wrap: anywhere; word-break: break-word; }
+  table.all th { white-space: nowrap; }
+
+  @media (max-width: 860px) {
+    .tool { grid-template-columns: 1fr; gap: 24px; }
+    .side { border-left: 0; padding-left: 0; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+    .checks { grid-template-columns: 1fr; }
+    .check + .check { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); padding-top: 10px; }
+    dl.who { grid-template-columns: 1fr; gap: 0 0; }
+    dl.who dd { margin-bottom: 8px; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="h-head">
+    <h1>Email header analyser</h1>
+    <p class="standfirst">Paste an email's headers to see who really sent it, the route it took, and whether it passed {{ ui.term("spf", "SPF") }}, {{ ui.term("dkim", "DKIM") }} and {{ ui.term("dmarc", "DMARC") }}. Everything happens in your browser.</p>
+  </div>
+  <noscript><p class="error">The analyser runs in your browser, so it needs JavaScript turned on.</p></noscript>
+
+  <div class="tool">
+    {# No name attribute: if JavaScript failed and the form submitted, the headers wouldn't be sent. #}
+    <form id="h-form" novalidate>
+      <label for="raw">Email headers</label>
+      <textarea id="raw" spellcheck="false" autocomplete="off" autocapitalize="off" aria-describedby="h-error" placeholder="Received: from ...&#10;Authentication-Results: ...&#10;From: ..."></textarea>
+      <div class="buttons">
+        <button type="submit" class="go">Analyse</button>
+        <button type="button" id="ex-normal">Try a normal email</button>
+        <button type="button" id="ex-suspicious">Try a suspicious one</button>
+        <button type="button" id="clear">Clear</button>
+      </div>
+      <p class="error" id="h-error" role="alert" hidden></p>
+    </form>
+    <aside class="side" aria-labelledby="h-how">
+      <h2 id="h-how">Getting the headers</h2>
+      <ol>
+        <li><strong>Gmail:</strong> open the email, the three-dot menu, then "Show original". Copy everything above the message text.</li>
+        <li><strong>Outlook:</strong> open the email, then "View message source" (or File, Properties, Internet headers).</li>
+        <li><strong>Apple Mail:</strong> View, Message, All Headers.</li>
+      </ol>
+      <p class="private">Headers can contain your address, names and IP addresses. Nothing you paste is uploaded or sent anywhere; the page couldn't if it tried.</p>
+    </aside>
+  </div>
+
+  <div id="results" aria-live="polite" hidden>
+    <section class="section" aria-labelledby="r-auth">
+      <h2 id="r-auth">Did it pass?</h2>
+      <div class="checks" id="checks"></div>
+      <p class="caution">Passing doesn't make an email safe: a scammer's own domain can pass all three. They show which domain really sent it, so check that it's the one you expect. Only the results your own mail server added count; the analyser reads the topmost ones, because lower ones can be written by the sender.</p>
+      <ul class="warnings" id="warnings"></ul>
+    </section>
+    <section class="section" aria-labelledby="r-who">
+      <h2 id="r-who">Who sent it</h2>
+      <dl class="who" id="who"></dl>
+    </section>
+    <section class="section" aria-labelledby="r-route">
+      <h2 id="r-route">The route, oldest first</h2>
+      <p class="caution" id="route-note"></p>
+      <ol class="route" id="route"></ol>
+    </section>
+    <section class="section" aria-labelledby="r-dkim" id="dkim-section">
+      <h2 id="r-dkim">DKIM signatures</h2>
+      <ul class="sigs" id="sigs"></ul>
+    </section>
+    <section class="section">
+      <details>
+        <summary>Every header (<span id="header-count"></span>)</summary>
+        <table class="all"><caption class="sr-only">Every header in the order it appears</caption>
+          <thead><tr><th scope="col">Name</th><th scope="col">Value</th></tr></thead><tbody id="all"></tbody></table>
+      </details>
+    </section>
+  </div>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Everything below runs on this device. Pasted text only ever reaches the page through
+  // textContent, never innerHTML, so headers can't inject markup.
+  const MAX_CHARS = 300000;
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, text, cls) => { const n = document.createElement(tag); if (text !== undefined) n.textContent = text; if (cls) n.className = cls; return n; };
+
+  // Two made-up emails, using example domains and documentation-only IP addresses.
+  const EXAMPLES = {
+    normal: [
+      "Received: from mail.example.org (mail.example.org [203.0.113.25])",
+      "        by mx.example.net with ESMTPS id k12sm4416ab",
+      "        for <you@example.net>; Mon, 06 Oct 2026 09:14:08 +0400",
+      "Authentication-Results: mx.example.net;",
+      "       dkim=pass header.i=@example.org header.s=mail2026;",
+      "       spf=pass (example.net: domain of news@example.org designates 203.0.113.25 as permitted sender) smtp.mailfrom=news@example.org;",
+      "       dmarc=pass (p=REJECT) header.from=example.org",
+      "Received: from laptop.internal (unknown [10.0.0.5])",
+      "        by mail.example.org with ESMTPSA id 3a9f;",
+      "        Mon, 06 Oct 2026 09:14:05 +0400",
+      "DKIM-Signature: v=1; a=rsa-sha256; d=example.org; s=mail2026; h=from:to:subject:date; bh=abc=; b=def=",
+      "From: Example Newsletter <news@example.org>",
+      "To: you@example.net",
+      "Subject: Your October update",
+      "Date: Mon, 06 Oct 2026 09:14:04 +0400",
+      "Message-ID: <20261006091404.1234@example.org>",
+      "Return-Path: <news@example.org>",
+    ].join("\n"),
+    suspicious: [
+      "Received: from relay.example.com (unknown [198.51.100.7])",
+      "        by mx.example.net with SMTP id x9q1;",
+      "        Tue, 07 Oct 2026 02:41:19 +0400",
+      "Authentication-Results: mx.example.net;",
+      "       dkim=none (no signature);",
+      "       spf=softfail (example.net: domain of transitioning billing@examplebank.example does not designate 198.51.100.7 as permitted sender) smtp.mailfrom=billing@examplebank.example;",
+      "       dmarc=fail (p=QUARANTINE) header.from=account-check.example",
+      "Received: from [192.0.2.44] (unknown [192.0.2.44])",
+      "        by relay.example.com with SMTP;",
+      "        Tue, 07 Oct 2026 02:41:11 +0400",
+      "From: \"security@examplebank.example\" <alerts@account-check.example>",
+      "Reply-To: Example Bank Support <help@payout-desk.example>",
+      "To: you@example.net",
+      "Subject: Urgent: confirm your account today",
+      "Date: Tue, 07 Oct 2026 02:41:10 +0400",
+      "Message-ID: <abc123@relay.example.com>",
+      "Return-Path: <billing@examplebank.example>",
+    ].join("\n"),
+  };
+
+  // ---------- Parsing ----------
+  function unfold(text) {
+    const headers = [];
+    for (const line of text.replace(/\r\n?/g, "\n").split("\n")) {
+      if (line.trim() === "") { if (headers.length) break; else continue; }   // a blank line ends the headers
+      if (/^[ \t]/.test(line) && headers.length) headers[headers.length - 1][1] += " " + line.trim();
+      else {
+        const m = line.match(/^([!-9;-~]+):\s?(.*)$/);   // header names are printable characters other than ":"
+        if (m) headers.push([m[1], m[2]]);
+      }
+    }
+    return headers;
+  }
+  const all = (headers, name) => headers.filter(([n]) => n.toLowerCase() === name).map(([, v]) => v);
+  const first = (headers, name) => all(headers, name)[0] || "";
+
+  function address(value) {
+    const angled = value.match(/<([^<>\s]+@[^<>\s]+)>/);
+    if (angled) return angled[1];
+    const bare = value.match(/[^\s<>"(),;:]+@[^\s<>"(),;:]+/);
+    return bare ? bare[0] : "";
+  }
+  const domainOf = (addr) => (addr.split("@")[1] || "").toLowerCase().replace(/[>.]+$/, "");
+  // Relaxed alignment, roughly as DMARC does it: the same domain, or one inside the other.
+  const aligned = (a, b) => a && b && (a === b || a.endsWith("." + b) || b.endsWith("." + a));
+
+  const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
+  function isPrivate(ip) {
+    if (ip.includes(":")) return /^(::1|f[cd][0-9a-f]{2}:|fe80:)/i.test(ip);
+    const [a, b] = ip.split(".").map(Number);
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) ||
+           (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254);
+  }
+
+  function parseReceived(value) {
+    const date = value.includes(";") ? value.slice(value.lastIndexOf(";") + 1).trim() : "";
+    const body = value.includes(";") ? value.slice(0, value.lastIndexOf(";")) : value;
+    const from = (body.match(/\bfrom\s+([\s\S]+?)(?=\s+by\s|\s+with\s|\s+id\s|\s+for\s|$)/i) || [])[1] || "";
+    const by = (body.match(/\bby\s+(\S+)/i) || [])[1] || "";
+    const withProto = (body.match(/\bwith\s+(\S+)/i) || [])[1] || "";
+    const ipMatch = from.match(/\[(?:IPv6:)?([0-9a-fA-F:.]+)\]/) || from.match(IPV4) ||
+                    from.match(/\(([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,})\)/);
+    const ip = ipMatch ? (ipMatch[1] || ipMatch[0]) : "";
+    const time = Date.parse(date);
+    return {
+      fromName: from.split(/\s+/)[0] || "", from, by, with: withProto, ip,
+      encrypted: /ESMTPS|SMTPS|ESMTPSA|LMTPS|TLS|HTTPS/i.test(withProto + " " + value),
+      time: isNaN(time) ? null : time, date,
+    };
+  }
+
+  function parseAuthResults(value) {
+    const parts = value.split(";").map((p) => p.trim()).filter(Boolean);
+    const results = {};
+    // Most servers start with their own name; Microsoft's start straight with a result.
+    const named = parts.length && !/^[a-z-]+\s*=/i.test(parts[0]);
+    for (const part of named ? parts.slice(1) : parts) {
+      const m = part.match(/^([a-z-]+)\s*=\s*([a-z]+)/i);
+      if (!m) continue;
+      const method = m[1].toLowerCase();
+      if (results[method]) continue;
+      const props = {};
+      part.replace(/\([^)]*\)/g, " ").replace(/\b([a-z]+\.[a-z-]+)=([^\s;]+)/gi, (_, k, v) => { props[k.toLowerCase()] = v; return ""; });
+      results[method] = { result: m[2].toLowerCase(), props, text: part };
+    }
+    return { server: named ? parts[0] : "", results };
+  }
+
+  function parseTags(value) {
+    const tags = {};
+    value.split(";").forEach((pair) => { const i = pair.indexOf("="); if (i > 0) tags[pair.slice(0, i).trim().toLowerCase()] = pair.slice(i + 1).trim(); });
+    return tags;
+  }
+
+  function duration(ms) {
+    const s = Math.round(ms / 1000);
+    if (s < 0) return "clocks disagree by " + duration(-ms);
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.round(s / 60) + " min";
+    return (s / 3600).toFixed(1) + " h";
+  }
+
+  // ---------- Showing ----------
+  const RESULT_CLASS = { pass: "pass", fail: "fail", hardfail: "fail", softfail: "soft", neutral: "soft", temperror: "soft",
+                         permerror: "fail", none: "none", policy: "soft", bestguesspass: "soft" };
+
+  function analyse(text) {
+    const headers = unfold(text);
+    if (!headers.length) return "No headers found. Paste the part of the email that starts with lines like \"Received:\" or \"From:\".";
+
+    const fromValue = first(headers, "from");
+    const fromAddr = address(fromValue), fromDomain = domainOf(fromAddr);
+    const returnPath = address(first(headers, "return-path")), replyTo = address(first(headers, "reply-to"));
+    const ar = all(headers, "authentication-results").map(parseAuthResults)[0] || null;
+    const receivedSpf = first(headers, "received-spf");
+    const auth = ar ? ar.results : {};
+    if (!auth.spf && receivedSpf) {
+      const m = receivedSpf.match(/^\s*([a-z]+)/i);
+      if (m) auth.spf = { result: m[1].toLowerCase(), props: {}, text: receivedSpf };
+    }
+    const received = all(headers, "received").map(parseReceived).reverse();   // oldest first
+    const warnings = [];
+
+    // Checks
+    const checks = $("checks");
+    checks.replaceChildren();
+    const explain = {
+      spf: (r) => r.props["smtp.mailfrom"] ? "Envelope sender: " + r.props["smtp.mailfrom"] : "Checks the sending server against the envelope sender's domain.",
+      dkim: (r) => r.props["header.d"] || r.props["header.i"] ? "Signed by " + (r.props["header.d"] || r.props["header.i"].replace(/^@/, "")) : "Checks the email's digital signature.",
+      dmarc: (r) => r.props["header.from"] ? "For the From domain " + r.props["header.from"] : "Ties SPF and DKIM to the From address.",
+    };
+    for (const method of ["spf", "dkim", "dmarc"]) {
+      const r = auth[method];
+      const box = el("div", undefined, "check");
+      box.append(el("h3", method.toUpperCase()));
+      box.append(el("p", r ? r.result : "not found", "result " + (r ? RESULT_CLASS[r.result] || "soft" : "none")));
+      box.append(el("p", r ? explain[method](r) : "No result in the headers. Your mail server may not add them."));
+      checks.append(box);
+    }
+
+    // Warnings, most serious first
+    const warn = (sev, title, text) => warnings.push({ sev, title, text });
+    if (!ar && !receivedSpf) warn("yellow", "No authentication results.", "Your mail server may not record them, or they weren't copied. Without them, the From address can't be checked.");
+    if (auth.dmarc && /fail/.test(auth.dmarc.result)) warn("red", "DMARC failed.", "Nothing proves this email came from " + (fromDomain || "the From domain") + ". Treat it as possibly forged.");
+    if (auth.spf && /fail/.test(auth.spf.result)) warn("orange", "SPF " + auth.spf.result + ".", "The server that sent it isn't on the sending domain's list of allowed servers.");
+    if (auth.dkim && /fail/.test(auth.dkim.result)) warn("orange", "DKIM failed.", "The signature doesn't match: the email was changed on the way, or the signature is fake.");
+    const display = fromValue.replace(/<[^>]*>/, "");
+    const shown = display.match(/[^\s<>"(),;:]+@[^\s<>"(),;:]+/);
+    if (shown && fromDomain && domainOf(shown[0]) !== fromDomain) warn("red", "The sender's name is a different address.", "It shows \"" + shown[0] + "\", but the email is really from " + fromAddr + ". A classic trick to look trustworthy.");
+    if (replyTo && fromDomain && !aligned(domainOf(replyTo), fromDomain)) warn("orange", "Replies go somewhere else.", "Replying sends your answer to " + replyTo + ", not to " + fromDomain + ".");
+    if (returnPath && fromDomain && !aligned(domainOf(returnPath), fromDomain)) warn("blue", "The envelope sender is a different domain.", "Bounces go to " + domainOf(returnPath) + ". Common for mailing services, but worth checking it's one you'd expect.");
+    if (auth.dkim && auth.dkim.result === "pass" && fromDomain && auth.dkim.props["header.d"] && !aligned(auth.dkim.props["header.d"].toLowerCase(), fromDomain)) warn("blue", "Signed by a different domain.", "DKIM passed for " + auth.dkim.props["header.d"] + ", not for " + fromDomain + ".");
+    const plain = received.filter((h) => !h.encrypted && h.by && !isPrivate(h.ip || "0.0.0.0"));
+    if (plain.length) warn("blue", "Part of the route wasn't encrypted.", plain.length + " hop" + (plain.length > 1 ? "s" : "") + " didn't record encryption, so the email could have been read in transit there.");
+    const order = { red: 0, orange: 1, yellow: 2, blue: 3 };
+    warnings.sort((a, b) => order[a.sev] - order[b.sev]);
+    const list = $("warnings");
+    list.replaceChildren(...warnings.map((w) => { const li = el("li", undefined, "sev-" + w.sev); li.append(el("strong", w.title), " " + w.text); return li; }));
+
+    // Who sent it
+    const who = $("who");
+    who.replaceChildren();
+    const row = (label, value, extra) => { if (!value) return; who.append(el("dt", label)); const dd = el("dd", value); if (extra) dd.append(extra); who.append(dd); };
+    row("From", fromValue);
+    row("Reply-To", first(headers, "reply-to"));
+    row("Return-Path", first(headers, "return-path"));
+    row("To", first(headers, "to"));
+    row("Subject", first(headers, "subject"));
+    row("Date", first(headers, "date"));
+    row("Message-ID", first(headers, "message-id"));
+    // The sending server: the IP in the newest hop with a public address, as recorded by your server.
+    const sender = [...received].reverse().find((h) => h.ip && !isPrivate(h.ip));
+    if (sender) {
+      const links = el("span", undefined, "ip-links");
+      for (const [href, text] of [["https://www.abuseipdb.com/check/" + sender.ip, "AbuseIPDB"],
+                                  ["https://www.virustotal.com/gui/ip-address/" + sender.ip, "VirusTotal"],
+                                  ["https://www.shodan.io/host/" + sender.ip, "Shodan"]]) {
+        const a = el("a", "Check on " + text); a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer"; links.append(a);
+      }
+      row("Sending server", sender.ip + (sender.fromName ? " (" + sender.fromName + ")" : ""), links);
+    }
+
+    // The route
+    const route = $("route");
+    route.replaceChildren();
+    received.forEach((h, i) => {
+      const li = el("li");
+      const line = el("span", undefined, "hop-line");
+      line.append(el("strong", h.fromName || "unknown"), " to ", el("strong", h.by || "unknown"));
+      const meta = el("span", undefined, "hop-meta");
+      if (h.ip) meta.append(el("span", h.ip + (isPrivate(h.ip) ? " (private network)" : ""), isPrivate(h.ip) ? "tag-private" : "mono"));
+      if (h.with) meta.append(el("span", h.encrypted ? "Encrypted (" + h.with + ")" : "Not encrypted (" + h.with + ")", h.encrypted ? "" : "tag-plain"));
+      const prev = received[i - 1];
+      if (h.time && prev && prev.time) meta.append(el("span", "+" + duration(h.time - prev.time) + " after the hop before"));
+      if (h.date) meta.append(el("span", h.date));
+      li.append(line, meta);
+      route.append(li);
+    });
+    $("route-note").textContent = received.length
+      ? "Each server adds a line at the top as it passes the email on. The last ones were added by your own mail provider; the earliest come from the sender's side and can be made up."
+      : "No Received lines, so the route can't be shown.";
+
+    // DKIM signatures
+    const sigs = all(headers, "dkim-signature").map(parseTags);
+    $("dkim-section").hidden = !sigs.length;
+    $("sigs").replaceChildren(...sigs.map((t) => el("li", "Domain " + (t.d || "?") + ", selector " + (t.s || "?") + (t.a ? ", " + t.a : ""))));
+
+    // Every header
+    $("header-count").textContent = headers.length;
+    $("all").replaceChildren(...headers.map(([n, v]) => { const tr = el("tr"); tr.append(el("th", n), el("td", v)); return tr; }));
+    return null;
+  }
+
+  const raw = $("raw"), error = $("h-error"), results = $("results");
+  function run() {
+    error.hidden = true;
+    const text = raw.value;
+    if (!text.trim()) { error.textContent = "Paste an email's headers first."; error.hidden = false; results.hidden = true; raw.focus(); return; }
+    if (text.length > MAX_CHARS) { error.textContent = "That's longer than headers ever are. Paste only the headers, not the whole message."; error.hidden = false; results.hidden = true; return; }
+    const problem = analyse(text);
+    if (problem) { error.textContent = problem; error.hidden = false; results.hidden = true; return; }
+    results.hidden = false;
+  }
+  $("h-form").addEventListener("submit", (e) => { e.preventDefault(); run(); });
+  $("ex-normal").addEventListener("click", () => { raw.value = EXAMPLES.normal; run(); });
+  $("ex-suspicious").addEventListener("click", () => { raw.value = EXAMPLES.suspicious; run(); });
+  $("clear").addEventListener("click", () => { raw.value = ""; results.hidden = true; error.hidden = true; raw.focus(); });
+})();
+</script>
+{% endblock %}
