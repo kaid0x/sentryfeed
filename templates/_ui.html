@@ -232,6 +232,8 @@
       title.textContent = "{{ resting_title }}";
     }
     clear.hidden = !selected;
+    // A picked country shows all its stories, even in a shortened list.
+    document.getElementById("stories").classList.toggle("filtered", !!selected);
   }
   buttons.forEach((b) => b.addEventListener("click", () => select(b.dataset.cc)));
   clear.addEventListener("click", () => {

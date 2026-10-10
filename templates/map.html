@@ -25,7 +25,7 @@
   .views button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 
   figure { margin: 0; }
-  .atlas { display: block; width: 100%; height: auto; aspect-ratio: 960 / 340; background: var(--sea); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); }
+  .atlas { display: block; width: 100%; height: auto; aspect-ratio: 960 / 422; background: var(--sea); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); }
   .atlas .country { fill: var(--atlas-land); stroke: var(--atlas-edge); stroke-width: 0.6px; vector-effect: non-scaling-stroke; }
   .atlas .country.dot { display: none; }
   .atlas .country.selected { stroke: var(--ink); stroke-width: 2.2px; }
@@ -68,6 +68,12 @@
   .unplaced .slist { columns: 2; column-gap: 48px; }
   .unplaced .slist li { break-inside: avoid; }
   .more-link { display: inline-block; font-weight: 600; padding: 10px 0; }
+  /* Collapsed until "Show all"; a picked country always shows all its stories. */
+  .slist.collapsed:not(.filtered) li.extra { display: none; }
+  .slist.filtered + .more-bar { display: none; }
+  .more-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; padding: 4px 0 8px; color: var(--muted); font-size: 14px; }
+  .more-button { min-height: 44px; padding: 0 18px; background: none; border: 1px solid var(--ink); font: 600 15px var(--sans); cursor: pointer; }
+  .more-button:hover { background: var(--ink); color: var(--bg); }
   .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); margin: 0; }
   .note-blame { font-size: 14px; color: var(--muted); margin: 12px 0 0; max-width: 70ch; }
 
@@ -102,21 +108,21 @@
   <div class="atlas-head">
     <div>
       <h1>Where it happened</h1>
-      <p class="standfirst">The last {{ "24 hours" if days == 1 else dict(windows)[days] }}. <b>{{ data.placed|length }}</b> of <b>{{ data.total }}</b> security stories named a country; the other {{ data.unplaced_count }} are listed under the map. Pick a country to see its stories.</p>
+      <p class="standfirst">The last {{ "24 hours" if days == 1 else dict(windows)[days] }}. <b>{{ data.placed|length }}</b> of <b>{{ data.total }}</b> security stories named a country; the other {{ data.unplaced_count }} are <a href="#h-unplaced">listed below the map</a>. Pick a country to see its stories.</p>
     </div>
     <div class="switches">
       <nav class="windows" aria-label="Time window">
         {% for d, label in windows %}<a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
       </nav>
       <div class="views" role="group" aria-label="Map view">
-        <button type="button" data-view="0 20 960 340" aria-pressed="true">World</button>
+        <button type="button" data-view="0 -2 960 422" aria-pressed="true">World</button>
         <button type="button" data-view="{{ gulf_view }}" aria-pressed="false">Gulf</button>
       </div>
     </div>
   </div>
 
   <figure>
-    <svg id="b-map" class="atlas" viewBox="0 20 960 340" preserveAspectRatio="xMidYMid meet" role="group" aria-label="World map of this week's stories. Use the country list below to explore it by keyboard.">
+    <svg id="b-map" class="atlas" viewBox="0 -2 960 422" preserveAspectRatio="xMidYMid meet" role="group" aria-label="World map of this week's stories. Use the country list below to explore it by keyboard.">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z"/></marker>
         <pattern id="hatch" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)"><line class="hatch-line" x1="0" y1="0" x2="0" y2="3"/></pattern>
@@ -153,9 +159,10 @@
 
     <section aria-labelledby="h-stories">
       <h2 id="h-stories"><span id="stories-title">All countries</span> <button type="button" class="clear" id="clear" hidden>Show all</button></h2>
+      {% set shown = 6 %}
       <ul class="slist" id="stories" aria-live="polite">
         {% for s in data.placed %}
-        <li class="sev-{{ s.severity }}" data-where="{{ s.where | join(' ') }}" data-blamed="{{ s.blamed | join(' ') }}">
+        <li class="sev-{{ s.severity }}{{ ' extra' if loop.index > shown }}" data-where="{{ s.where | join(' ') }}" data-blamed="{{ s.blamed | join(' ') }}">
           {{ kicker(s) }}
           <h3 class="list-head">{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.headline }}</a>{% else %}{{ s.headline }}{% endif %}</h3>
           <p class="meta"><span>{{ s.source }}{% if s.also %} and {{ s.also|length }} more{% endif %}</span><span>{{ s.age }}</span>
@@ -164,6 +171,12 @@
         </li>
         {% endfor %}
       </ul>
+      {% if data.placed|length > shown %}
+      <p class="more-bar" id="more-bar" hidden>
+        <span id="more-note">Showing the {{ shown }} most important of {{ data.placed|length }}.</span>
+        <button type="button" class="more-button" id="more-button" aria-controls="stories" aria-expanded="false">Show all {{ data.placed|length }} stories</button>
+      </p>
+      {% endif %}
       {% if not data.placed %}<p class="empty">Nothing to show on the map in this window.</p>{% endif %}
     </section>
   </div>
@@ -189,5 +202,28 @@
 {% endblock %}
 
 {% block scripts %}
-{% if data %}{{ ui.atlas_script("b-map", "All countries") }}{% endif %}
+{% if data %}{{ ui.atlas_script("b-map", "All countries") }}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const list = document.getElementById("stories");
+  const bar = document.getElementById("more-bar");
+  if (!list || !bar) return;
+  const button = document.getElementById("more-button");
+  const note = document.getElementById("more-note");
+  const total = list.querySelectorAll("li").length;
+  const shown = total - list.querySelectorAll("li.extra").length;
+  // Without JavaScript the whole list stays visible; with it, the list starts short.
+  list.classList.add("collapsed");
+  bar.hidden = false;
+  button.addEventListener("click", () => {
+    const opening = list.classList.contains("collapsed");
+    list.classList.toggle("collapsed", !opening);
+    button.setAttribute("aria-expanded", String(opening));
+    button.textContent = opening ? "Show fewer" : "Show all " + total + " stories";
+    note.textContent = opening ? "Showing all " + total + "." : "Showing the " + shown + " most important of " + total + ".";
+    if (!opening) bar.scrollIntoView({ block: "nearest" });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}
