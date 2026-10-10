@@ -111,14 +111,19 @@ def tracked_cves(conn):
 
 
 def fill_recent_kev_details(conn, log):
-    """NVD descriptions and fix links for recently listed flaws, so the KEV list's CVE pages
-    open without a live lookup. Uses the same pacing as the collector's own CVE lookups."""
+    """NVD descriptions and fix links for recently listed flaws and CVEs in recent news (some were
+    looked up before descriptions were kept), so their pages and the patch queue need no live lookup.
+    Uses the same pacing as the collector's own CVE lookups."""
     key = enrich.api_key()
     pace = enrich.PACE_WITH_KEY if key else enrich.PACE_NO_KEY
     since = (today() - timedelta(days=DETAILS_FOR_NEW_KEV_DAYS)).isoformat()
+    have = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM cve_details")}
     missing = [r["cve_id"] for r in conn.execute(
-        """SELECT cve_id FROM kev WHERE date_added >= ? AND cve_id NOT IN (SELECT cve_id FROM cve_details)
-           ORDER BY date_added DESC""", (since,))]
+        "SELECT cve_id FROM kev WHERE date_added >= ? ORDER BY date_added DESC", (since,)) if r["cve_id"] not in have]
+    news_since = (datetime.now(timezone.utc) - timedelta(days=NEWS_DAYS)).isoformat()
+    for row in conn.execute("SELECT cves FROM items WHERE cves != '' AND published >= ? ORDER BY published DESC",
+                            (news_since,)):
+        missing += [c for c in row["cves"].split(",") if c not in have and c not in missing]
     done = 0
     for cve_id in missing[:min(DETAILS_BUDGET, pace["budget"])]:
         try:
@@ -144,7 +149,7 @@ def update(conn, log=print):
         log(f"EPSS: scores for {len(ids)} CVEs")
     done, left = fill_recent_kev_details(conn, log)
     if done or left:
-        log(f"KEV details from NVD: {done} fetched, {left} left for later runs")
+        log(f"CVE details from NVD: {done} fetched, {left} left for later runs")
 
 
 # ---------- Reading (the pages) ----------
@@ -251,6 +256,108 @@ def look_up(conn, cve_id, visitor):
     if details:
         details["refs"] = json.loads(details["refs"] or "[]")
     return details, (dict(score) if score else None), note
+
+
+# ---------- Patch this first ----------
+
+QUEUE_NEWS_DAYS = 7         # CVEs in this week's news
+QUEUE_KEV_DAYS = 30         # and flaws CISA added this month, or whose deadline is still ahead
+QUEUE_SIZE = 25
+
+# The points, shown on the page next to each flaw so the order can always be checked.
+POINTS_KEV = 40
+POINTS_RANSOMWARE = 10
+POINTS_EPSS = 30            # times the chance of exploitation (0 to 1)
+POINTS_CVSS_MAX = 10        # 7.0 scores 3, 8.0 scores 5, 9.0 scores 8, 9.8 or more scores 10
+POINTS_PER_ARTICLE = 2
+POINTS_NEWS_MAX = 10
+POINTS_DUE_SOON = 5         # CISA's deadline within a week
+DUE_SOON_DAYS = 7
+
+
+def _details_for(conn, cve_ids):
+    marks = ",".join("?" * len(cve_ids))
+    rows = conn.execute(f"SELECT * FROM cve_details WHERE cve_id IN ({marks})", list(cve_ids)) if cve_ids else []
+    return {r["cve_id"]: {**dict(r), "refs": json.loads(r["refs"] or "[]")} for r in rows}
+
+
+def _fix(details):
+    """What NVD says about a fix: (status, link or None)."""
+    if details is None:
+        return "unchecked", None
+    patch = next((r["url"] for r in details["refs"] if "Patch" in r["tags"]), None)
+    if patch:
+        return "patch", patch
+    advisory = next((r["url"] for r in details["refs"] if "Vendor Advisory" in r["tags"]), None)
+    if advisory:
+        return "advisory", advisory
+    return "none", None
+
+
+def patch_queue(conn, stories, product_match=None):
+    """The flaws most worth fixing first. stories: security stories from the last QUEUE_NEWS_DAYS days,
+    grouped and prepared. product_match(vendor, product, name) -> My stack product ids, for KEV flaws.
+    Returns the top QUEUE_SIZE as dicts with their points spelled out."""
+    mentions = {}
+    for s in stories:
+        for cve_id in s["cves"]:
+            m = mentions.setdefault(cve_id, {"articles": 0, "stories": [], "products": set()})
+            m["articles"] += 1 + len(s["also"])
+            m["stories"].append(s)
+            m["products"].update(s["products"])
+    since, now_day = (today() - timedelta(days=QUEUE_KEV_DAYS)).isoformat(), today()
+    kev = {r["cve_id"]: dict(r) for r in conn.execute(
+        "SELECT * FROM kev WHERE date_added >= ? OR due_date >= ?", (since, now_day.isoformat()))}
+    named = list(set(mentions) - set(kev))
+    if named:
+        marks = ",".join("?" * len(named))
+        kev.update({r["cve_id"]: dict(r) for r in conn.execute(f"SELECT * FROM kev WHERE cve_id IN ({marks})", named)})
+    ids = set(mentions) | set(kev)
+    scores, details, cached = epss_for(conn, ids), _details_for(conn, ids), cvss_for(conn, ids)
+
+    rows = []
+    for cve_id in ids:
+        k, d, e, m = kev.get(cve_id), details.get(cve_id), scores.get(cve_id), mentions.get(cve_id)
+        cvss = (d or {}).get("cvss") if (d or {}).get("cvss") is not None else cached.get(cve_id)
+        why = []
+        if k:
+            why.append(("kev", "On CISA's exploited list", POINTS_KEV))
+            if k["ransomware"]:
+                why.append(("ransomware", "Used by ransomware", POINTS_RANSOMWARE))
+        if e and round(e["score"] * POINTS_EPSS) >= 1:
+            why.append(("epss", f"{epss_words(e['score'])} chance of use in 30 days", round(e["score"] * POINTS_EPSS)))
+        if cvss is not None and cvss >= 7:
+            why.append(("cvss", f"Rated {cvss} out of 10", min(POINTS_CVSS_MAX, round((cvss - 6) * 2.6))))
+        if m:
+            n = m["articles"]
+            why.append(("news", f"In {n} article{'s' if n != 1 else ''} this week", min(POINTS_NEWS_MAX, n * POINTS_PER_ARTICLE)))
+        if k and k["due_date"] and 0 <= (date.fromisoformat(k["due_date"]) - now_day).days <= DUE_SOON_DAYS:
+            why.append(("due", f"CISA deadline {due_words(k['due_date'])}", POINTS_DUE_SOON))
+        if not why:
+            continue
+        # A heading in words: CISA's name, or Microsoft's advisory title (one per CVE), else the ID.
+        stories_here = (m or {}).get("stories", [])
+        msrc = next((s["headline"] for s in stories_here if s["source"] == "Microsoft MSRC"), None)
+        products = set((m or {}).get("products", ()))
+        if k and product_match:
+            products.update(product_match(k["vendor"], k["product"], k["name"]))
+        fix, fix_link = _fix(d)
+        lead = max(stories_here, key=lambda s: 1 + len(s["also"])) if stories_here else None
+        rows.append({
+            "cve_id": cve_id,
+            "title": (k["name"] if k else None) or msrc or cve_id,
+            "vendor": f"{k['vendor']} {k['product']}" if k else None,
+            "story": lead if not msrc and not k else None,
+            "why": why,
+            "total": sum(p for _, _, p in why),
+            "epss": e["score"] if e else None,
+            "fix": fix,
+            "fix_link": fix_link,
+            "products": sorted(products),
+            "date": (k["date_added"] if k else None) or (lead["published"][:10] if lead and lead["published"] else None),
+        })
+    rows.sort(key=lambda r: (-r["total"], -(r["epss"] or 0), r["cve_id"]))
+    return rows[:QUEUE_SIZE]
 
 
 # ---------- Plain words ----------

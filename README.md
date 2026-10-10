@@ -49,6 +49,21 @@ collect.py ──> stocks.py   breached US-listed companies: SEC filings and sha
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
 
+## Patch this first
+
+`/patch` is a ranked to-do list: the flaws most worth fixing this week. It takes every CVE in the last 7 days of security news, plus every flaw CISA added in the last 30 days or whose deadline is still ahead, and gives each one points, shown next to it so the order can always be checked:
+
+| Signal | Points |
+|---|---|
+| On CISA's exploited list | 40 |
+| Used by ransomware, says CISA | 10 |
+| EPSS: chance of being used in the next 30 days | up to 30 (30 × the chance) |
+| CVSS: rated 7 or more out of 10 | up to 10 (7.0 scores 3, 9.8 scores 10) |
+| News: each article this week | 2 each, up to 10 |
+| CISA's deadline within 7 days | 5 |
+
+Being exploited counts most, because a flaw already used in attacks matters more than a worse one nobody is using. Each entry also says whether NVD's record links to a patch or a vendor advisory (the collector fills in NVD details for recent news CVEs and new CISA additions). The top 25 are kept, 10 shown at first. Flaws about products in My stack are marked, and "Your stack first" moves them to the top, all in the browser. The list has its own feed, `/feeds/patch.xml`, with one item per CVE so a flaw moving up or down isn't repeated.
+
 ## Weekly digest
 
 `/digest` opens the latest finished week; each week has its own page, like `/digest/2026-W41`, with links to the weeks before and after and an archive of every week. Weeks run Monday to Sunday, Dubai time. Each one has:
@@ -69,6 +84,7 @@ Comparisons only appear between two complete weeks: not for the week in progress
 | `/feeds/major-medium.xml` | Major and Medium stories |
 | `/feeds/gulf.xml` | The Gulf, as on the front page: regional outlets and stories naming a GCC country, without vendor announcements |
 | `/feeds/events.xml` | Approved upcoming events |
+| `/feeds/patch.xml` | Patch this first: the ranked list, with each flaw's points |
 | `/feeds/stack.xml?stack=fortinet,exchange` | Stories about the products in the link, as on My stack |
 
 Each item has the readable headline, the plain-word reason, the summary, the other outlets and the CVEs, and links to the article. An item's ID is the story's first stored article, so it doesn't reappear when more outlets cover the same story. Feeds are RSS 2.0, built with ElementTree so feed text is always escaped, and every page advertises the Major feeds for readers that look for them.

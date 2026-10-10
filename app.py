@@ -577,6 +577,38 @@ def digest_week(week):
     )
 
 
+def stack_products(vendor, product, name):
+    """My stack product ids a CISA entry is about, using the same matching as stories."""
+    return stack.match({"title": f"{vendor} {product}", "summary": name})
+
+
+def build_patch_queue():
+    stories = [s for s in load_items(vulns.QUEUE_NEWS_DAYS) if s["severity"] in briefing.SECURITY]
+    conn = connect()
+    try:
+        return vulns.patch_queue(conn, stories, stack_products)
+    finally:
+        conn.close()
+
+
+@app.route("/patch")
+def patch_first():
+    def build():
+        queue = build_patch_queue()
+        for row in queue:
+            row["fix_link"] = safe_link(row["fix_link"])
+            if row["story"]:
+                row["story"]["link"] = safe_link(row["story"]["link"])
+        return {"queue": queue}
+
+    return page_or_unavailable("patch.html", build, active="patch", stack_names=stack.NAMES,
+                               news_days=vulns.QUEUE_NEWS_DAYS, kev_days=vulns.QUEUE_KEV_DAYS,
+                               points={"kev": vulns.POINTS_KEV, "ransomware": vulns.POINTS_RANSOMWARE,
+                                       "epss": vulns.POINTS_EPSS, "cvss": vulns.POINTS_CVSS_MAX,
+                                       "article": vulns.POINTS_PER_ARTICLE, "news": vulns.POINTS_NEWS_MAX,
+                                       "due": vulns.POINTS_DUE_SOON, "due_days": vulns.DUE_SOON_DAYS})
+
+
 SEVERITY_LABEL = dict(SEVERITIES)
 MAX_STACK_PRODUCTS = 60
 
@@ -601,7 +633,12 @@ def feed_xml(name):
         abort(404)
     page_url = url_for("feeds_page", _external=True)
     feed_url = request.url
-    if name == "events":
+    if name == "patch":
+        title, desc = rss.FEEDS[name]
+        items = [rss.patch_item(row, rank, url_for("vulnerability", cve_id=row["cve_id"], _external=True))
+                 for rank, row in enumerate(build_patch_queue(), 1)]
+        body = rss.build(title, desc, url_for("patch_first", _external=True), feed_url, items)
+    elif name == "events":
         conn = connect()
         try:
             listed = events.upcoming(conn)

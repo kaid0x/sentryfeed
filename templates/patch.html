@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Patch this first · SentryFeed{% endblock %}
+
+{% set fix_words = {"patch": "Patch available", "advisory": "Vendor advisory", "none": "No patch link in NVD's record: check the vendor", "unchecked": "Fix not checked yet"} %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .p-head { margin: 28px 0 18px; }
+  .p-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 16px 0 0; font-size: 14px; color: var(--muted); }
+  .stack-first { min-height: 44px; padding: 0 14px; border: 1px solid var(--rule); background: none; font: 600 14px var(--sans); cursor: pointer; }
+  #stack-note:empty { display: none; }
+  .stack-first[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+
+  .queue { list-style: none; margin: 18px 0 0; padding: 0; border-top: 2px solid var(--strong-rule); }
+  .queue > li { display: grid; grid-template-columns: 56px 1fr auto; gap: 4px 16px; padding: 16px 0 18px; border-bottom: 1px solid var(--rule); }
+  .rank { font: 700 30px/1 var(--serif); }
+  .queue h2 { font: 700 20px/1.25 var(--serif); margin: 0 0 4px; }
+  .queue h2 a { text-decoration: none; } .queue h2 a:hover { text-decoration: underline; }
+  .sub { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
+  .sub .cve { font: 13.5px var(--mono); color: var(--ink); }
+  .mine { color: var(--blue); font-weight: 700; }
+  .total { text-align: right; }
+  .total b { display: block; font: 700 28px/1 var(--serif); }
+  .total span { font-size: 13px; color: var(--muted); }
+  .why { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+  .why li { border: 1px solid var(--rule); padding: 3px 9px; font-size: 13.5px; }
+  .why .kev { border-color: var(--red); color: var(--red); }
+  .why .ransomware { border-color: var(--red); color: var(--red); }
+  .why b { font-variant-numeric: tabular-nums; }
+  .fix { margin: 0; font-size: 14px; }
+  .fix.patch { color: var(--green); font-weight: 600; }
+  .story-line { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
+  .more-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; padding: 12px 0; color: var(--muted); font-size: 14px; }
+  .more-button { min-height: 44px; padding: 0 18px; background: none; border: 1px solid var(--ink); font: 600 15px var(--sans); cursor: pointer; }
+  .more-button:hover { background: var(--ink); color: var(--bg); }
+  .queue.collapsed > li.extra { display: none; }
+
+  .how { margin-top: 44px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .how h2 { font: 700 24px var(--serif); margin: 0 0 10px; }
+  .how p { max-width: 68ch; }
+  .points { border-collapse: collapse; font-size: 15px; margin: 8px 0 12px; }
+  .points th, .points td { text-align: left; padding: 6px 18px 6px 0; border-bottom: 1px solid var(--rule); }
+  .points td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); }
+
+  @media (max-width: 600px) {
+    .queue > li { grid-template-columns: 40px 1fr; }
+    .total { grid-column: 2; text-align: left; }
+    .total b { display: inline; font-size: 20px; margin-right: 6px; }
+    .rank { font-size: 24px; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="p-head">
+    <h1>Patch this first</h1>
+    <p class="standfirst">The flaws most worth fixing this week, ranked by points you can check: whether they're on {{ ui.term("kev", "CISA's exploited list") }}, their {{ ui.term("epss", "chance of being used") }}, how {{ ui.term("cvss", "severe") }} they are, and how much they're in the news.</p>
+    <div class="controls">
+      <button type="button" class="stack-first" id="stack-first" aria-pressed="false" hidden>Your stack first</button>
+      <span id="stack-note"></span>
+      <a href="/feeds">Follow by RSS</a>
+    </div>
+  </div>
+
+{% if error %}
+  <p class="empty">SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+{% elif not data.queue %}
+  <p class="empty">Nothing to patch this week: no CVEs in the news and nothing new on CISA's list.</p>
+{% else %}
+  <ol class="queue" id="queue">
+    {% for r in data.queue %}
+    <li class="{{ 'extra' if loop.index > 10 }}" data-products="{{ r.products | join(' ') }}" data-rank="{{ loop.index }}">
+      <span class="rank" aria-hidden="true">{{ loop.index }}</span>
+      <div>
+        <h2><a href="/vulns/{{ r.cve_id }}"><span class="sr-only">{{ loop.index }}. </span>{{ r.title }}</a></h2>
+        <p class="sub"><span class="cve">{{ r.cve_id }}</span>{% if r.vendor %} · {{ r.vendor }}{% endif %}<span class="mine" hidden> · In your stack</span></p>
+        {% if r.story %}<p class="story-line">In the news: {% if r.story.link %}<a href="{{ r.story.link }}" rel="noopener noreferrer">{{ r.story.headline }}</a>{% else %}{{ r.story.headline }}{% endif %}</p>{% endif %}
+        <ul class="why" aria-label="Why it's here">
+          {% for key, label, points in r.why %}<li class="{{ key }}">{{ label }} <b>+{{ points }}</b></li>{% endfor %}
+        </ul>
+        <p class="fix {{ r.fix }}">{% if r.fix_link %}<a href="{{ r.fix_link }}" rel="noopener noreferrer">{{ fix_words[r.fix] }}</a>{% else %}{{ fix_words[r.fix] }}{% endif %}</p>
+      </div>
+      <p class="total"><b>{{ r.total }}</b><span>points</span></p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% if data.queue|length > 10 %}
+  <p class="more-bar" id="more-bar" hidden>
+    <span id="more-note">Showing the top 10 of {{ data.queue|length }}.</span>
+    <button type="button" class="more-button" id="more-button" aria-controls="queue" aria-expanded="false">Show all {{ data.queue|length }}</button>
+  </p>
+  {% endif %}
+{% endif %}
+
+  <section class="how" aria-labelledby="h-how">
+    <h2 id="h-how">How the order is worked out</h2>
+    <p>Every CVE in the last {{ news_days }} days of security news, and every flaw CISA added in the last {{ kev_days }} days or whose deadline is still ahead, gets points:</p>
+    <table class="points">
+      <thead><tr><th scope="col">Signal</th><th scope="col">Points</th></tr></thead>
+      <tbody>
+        <tr><td>On CISA's exploited list</td><td class="n">{{ points.kev }}</td></tr>
+        <tr><td>Used by ransomware, says CISA</td><td class="n">{{ points.ransomware }}</td></tr>
+        <tr><td>EPSS: chance of being used in the next 30 days</td><td class="n">up to {{ points.epss }} ({{ points.epss }} × the chance)</td></tr>
+        <tr><td>CVSS: rated 7 or more out of 10</td><td class="n">up to {{ points.cvss }}</td></tr>
+        <tr><td>News: each article this week</td><td class="n">{{ points.article }} each, up to {{ points.news }}</td></tr>
+        <tr><td>CISA's deadline within {{ points.due_days }} days</td><td class="n">{{ points.due }}</td></tr>
+      </tbody>
+    </table>
+    <p>Being exploited counts most: a flaw already used in attacks matters more than a worse one nobody is using. "Patch available" means NVD's record links to a patch; it doesn't prove you have it. Your stack only reorders the list in your browser; it's never sent anywhere.</p>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const list = document.getElementById("queue");
+  if (!list) return;
+  const NAMES = {{ stack_names | tojson }};
+  const items = Array.from(list.children);
+
+  // Top 10 first, the rest behind "Show all".
+  const bar = document.getElementById("more-bar");
+  if (bar) {
+    const button = document.getElementById("more-button"), note = document.getElementById("more-note");
+    list.classList.add("collapsed");
+    bar.hidden = false;
+    button.addEventListener("click", () => {
+      const opening = list.classList.contains("collapsed");
+      list.classList.toggle("collapsed", !opening);
+      button.setAttribute("aria-expanded", String(opening));
+      button.textContent = opening ? "Show fewer" : "Show all " + items.length;
+      note.textContent = opening ? "Showing all " + items.length + "." : "Showing the top 10 of " + items.length + ".";
+    });
+  }
+
+  // Your stack: marked, and optionally moved to the top, all in this browser.
+  let mine = new Set();
+  try { mine = new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES)); } catch (e) { /* none */ }
+  if (!mine.size) return;
+  const hits = items.filter((li) => li.dataset.products.split(" ").some((p) => p && mine.has(p)));
+  hits.forEach((li) => { li.querySelector(".mine").hidden = false; });
+  const toggle = document.getElementById("stack-first");
+  const note = document.getElementById("stack-note");
+  note.textContent = hits.length === 1 ? "1 flaw here is in your stack." : hits.length + " flaws here are in your stack.";
+  if (!hits.length) return;
+  toggle.hidden = false;
+  toggle.addEventListener("click", () => {
+    const on = toggle.getAttribute("aria-pressed") !== "true";
+    toggle.setAttribute("aria-pressed", String(on));
+    const order = on ? [...hits, ...items.filter((li) => !hits.includes(li))] : items;
+    // Moved items keep their real rank number; the first ten shown are always the ones in view.
+    order.forEach((li, i) => { li.classList.toggle("extra", i >= 10); list.append(li); });
+  });
+})();
+</script>
+{% endblock %}

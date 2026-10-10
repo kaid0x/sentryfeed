@@ -21,6 +21,8 @@ FEEDS = {
                                                  "malware and flaws rated 7 or more out of 10."),
     "gulf": ("In the Gulf", "Security news from the Gulf's own outlets and any story naming a GCC country, "
                             "without vendor announcements."),
+    "patch": ("Patch this first", "The flaws most worth fixing first this week, ranked by CISA's exploited "
+                                  "list, the chance of exploitation, severity and news coverage."),
     "events": ("Events", "CTFs, webinars, conferences and meetups listed on SentryFeed, once approved."),
 }
 
@@ -55,6 +57,21 @@ def story_item(story, severity_label):
         "published": story["published"],
         "description": "\n\n".join(lines),
         "category": severity_label,
+    }
+
+
+def patch_item(row, rank, page_url):
+    """A patch-queue entry. One item per CVE, so a flaw moving up or down the queue isn't repeated."""
+    why = "; ".join(f"{label} (+{points})" for _, label, points in row["why"])
+    fix = {"patch": "A patch is available.", "advisory": "The vendor has an advisory.",
+           "none": "No patch link in NVD's record: check the vendor.", "unchecked": "Fix not checked yet."}[row["fix"]]
+    return {
+        "title": f"{row['title']} ({row['cve_id']})" if row["title"] != row["cve_id"] else row["cve_id"],
+        "link": page_url,
+        "guid": f"sentryfeed-patch-{row['cve_id']}",
+        "published": row["date"] + "T00:00:00+00:00" if row["date"] and len(row["date"]) == 10 else row["date"],
+        "description": f"Number {rank} this week, {row['total']} points. Why: {why}. {fix}",
+        "category": "Patch this first",
     }
 
 
