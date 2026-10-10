@@ -50,6 +50,16 @@ collect.py ──> stocks.py   breached US-listed companies: SEC filings and sha
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
 
+## Gulf Cyber Pulse
+
+`/gulf` brings together cyber incidents in the six GCC countries, and says when it started tracking (late September 2026) and that the news side is thin for now:
+
+- **Country by country:** for the UAE, Saudi Arabia, Qatar, Kuwait, Bahrain and Oman, how many security stories named it as where an incident happened, how many ransomware claims named it, and the sector hit and gang seen most.
+- **Month by month:** ransomware claims naming a GCC country over the last 12 months (chart with keyboard readouts and a table), and Gulf security stories per month since tracking began.
+- **Sectors hit** and **gangs active in the Gulf**, from those claims; **who's blamed** for attacks on the Gulf, from the news (what the reporting says, not proven attribution); and the **latest Gulf stories**.
+
+The news side uses the front page's Gulf filter (the regional outlets, or any story naming a GCC country, without vendor announcements). The claims come from Ransomware.live (credited); to show sectors and gangs per country, `ransomware.py` also counts GCC claims by country and sector together and by country and gang, still counts only, and re-counts older months once when that changes.
+
 ## Ransomware claims
 
 `/ransomware` counts the attacks ransomware gangs claim on their leak sites: claims per month for the last 12 months, this month so far against last month, the top countries, sectors and gangs, and the GCC on its own. **No victim is named.** The page says plainly that these are claims, not confirmed attacks: gangs exaggerate, repost or invent victims, and victims who pay quickly never appear.

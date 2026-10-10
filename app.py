@@ -791,6 +791,29 @@ def ransomware_stats():
     return page_or_unavailable("ransomware.html", build, active="ransomware", months_wanted=ransomware.MONTHS)
 
 
+PULSE_MAX_DAYS = 365
+
+
+@app.route("/gulf")
+def gulf_pulse():
+    first = first_story_time()
+
+    def build():
+        days = min(PULSE_MAX_DAYS, (datetime.now(timezone.utc) - first).days + 1) if first else 1
+        news = briefing.gulf_pulse(load_items(days))
+        for s in news["latest"]:
+            s["link"] = safe_link(s["link"])
+        conn = connect()
+        try:
+            claims = ransomware.gulf(conn)
+        finally:
+            conn.close()
+        return {"news": news, "claims": claims}
+
+    return page_or_unavailable("gulf.html", build, active="gulf", since=first.astimezone(briefing.DUBAI) if first else None,
+                               gcc=briefing.GCC_ORDER, months_wanted=ransomware.MONTHS)
+
+
 @app.route("/headers")
 def headers():
     return render_template("headers.html", active="headers")

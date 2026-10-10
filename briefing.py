@@ -96,7 +96,8 @@ NAV = [
     ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
                ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
                ("Patch this first", "/patch", "patch"), ("Vendor track record", "/vendors", "vendors"),
-               ("Ransomware stats", "/ransomware", "ransomware"), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
+               ("Ransomware stats", "/ransomware", "ransomware"), ("Weekly digest", "/digest", "digest"),
+               ("Gulf Cyber Pulse", "/gulf", "gulf")]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", "/headers", "headers"), ("Domain check", None, None)]),
     ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
@@ -483,4 +484,31 @@ def digest(stories, new_kev, incidents, upcoming, prev=None):
         "gulf": by_importance(gulf)[:5],
         "gulf_dropped": gulf_dropped,
         "upcoming": upcoming,
+    }
+
+
+# ---------- Gulf Cyber Pulse ----------
+
+GCC_ORDER = ["AE", "SA", "QA", "KW", "BH", "OM"]
+
+
+def gulf_pulse(stories):
+    """The news side of /gulf. stories: every story since collection began, prepared. Uses the same
+    filter as the front page's "In the Gulf" (regional outlets, or naming a GCC country; no vendor news)."""
+    kept, dropped = gulf_stories(stories)
+    security = [s for s in kept if s["severity"] in SECURITY]
+    per_month = Counter()
+    for s in security:
+        if s["published"]:
+            per_month[datetime.fromisoformat(s["published"]).astimezone(DUBAI).strftime("%Y-%m")] += 1
+    named = Counter(cc for s in security for cc in set(s["where"]) & GCC)
+    blamed = Counter(cc for s in security if GCC & set(s["where"]) for cc in s["blamed"] if cc not in GCC)
+    return {
+        "total": len(security),
+        "dropped": dropped,
+        "months": sorted(per_month.items()),
+        "named": {cc: named.get(cc, 0) for cc in GCC_ORDER},
+        "blamed": [(cc, n) for cc, n in blamed.most_common(6)],
+        "latest": sorted(security, key=lambda s: s["published"] or "", reverse=True)[:8],
+        "by_severity": Counter(s["severity"] for s in security),
     }

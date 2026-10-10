@@ -33,6 +33,10 @@ MONTHS = 12                         # how far back the page goes
 REFRESH_EVERY = timedelta(hours=20)
 CALLS_PER_RUN = {"pro": MONTHS + 2, "free": 1}   # the keyless API allows one request a minute
 UNKNOWN_SECTORS = {"", "not found", "other", "unknown", "n/a"}
+GCC = {"AE", "SA", "QA", "KW", "BH", "OM"}
+# Bumped when count() records something new; older months are then counted again.
+# 2: GCC claims also counted by country and sector together, and by country and gang.
+COUNT_VERSION = "2"
 
 
 def api_key():
@@ -71,10 +75,16 @@ def count(records):
     """Counts by country (ISO code, "" for unknown), sector and gang. Names are never read."""
     totals = Counter({("total", "all"): len(records)})
     for r in records:
-        totals[("country", (r.get("country") or "").strip().upper()[:2])] += 1
+        country = (r.get("country") or "").strip().upper()[:2]
         sector = (r.get("activity") or r.get("sector") or "").strip()
-        totals[("sector", "" if sector.lower() in UNKNOWN_SECTORS else sector)] += 1
-        totals[("group", (r.get("group") or r.get("group_name") or "").strip().lower())] += 1
+        sector = "" if sector.lower() in UNKNOWN_SECTORS else sector
+        group = (r.get("group") or r.get("group_name") or "").strip().lower()
+        totals[("country", country)] += 1
+        totals[("sector", sector)] += 1
+        totals[("group", group)] += 1
+        if country in GCC:     # for the Gulf Cyber Pulse: which sectors and gangs, per GCC country
+            totals[("gcc-sector", f"{country}|{sector}")] += 1
+            totals[("gcc-group", f"{country}|{group}")] += 1
     return totals
 
 
@@ -84,13 +94,14 @@ def save(conn, month, totals, source):
         conn.executemany("INSERT INTO ransomware_counts (month, dimension, key, count) VALUES (?, ?, ?, ?)",
                          [(month, dim, key, n) for (dim, key), n in totals.items()])
     set_meta(conn, f"ransomware_{month}", datetime.now(timezone.utc).isoformat())
+    set_meta(conn, f"ransomware_{month}_version", COUNT_VERSION)
     set_meta(conn, "ransomware_source", source)
 
 
 def _needs(conn, month, recent):
     """A month is fetched if it never has been; this month and last are refreshed once a day."""
     last = get_meta(conn, f"ransomware_{month}")
-    if not last:
+    if not last or get_meta(conn, f"ransomware_{month}_version") != COUNT_VERSION:
         return True
     return recent and datetime.now(timezone.utc) - datetime.fromisoformat(last) > REFRESH_EVERY
 
@@ -161,6 +172,43 @@ def stats(conn, gcc, top=10):
         "groups": [(g, n) for g, n in year_groups.most_common() if g][:top],
         "groups_now": [(g, n) for g, n in totals("group", [current] if current in by else []).most_common() if g][:5],
         "source": get_meta(conn, "ransomware_source"),
+    }
+
+
+def gulf(conn):
+    """The GCC's share of the last MONTHS months: per country totals, top sectors and gangs (overall
+    and per country), and claims per month. None until any month is counted."""
+    months = month_ids()
+    rows = conn.execute(
+        f"""SELECT month, dimension, key, count FROM ransomware_counts
+            WHERE month IN ({','.join('?' * len(months))}) AND dimension IN ('country', 'gcc-sector', 'gcc-group')""",
+        months).fetchall()
+    if not rows:
+        return None
+    counted = {r["month"] for r in conn.execute(
+        f"SELECT DISTINCT month FROM ransomware_counts WHERE month IN ({','.join('?' * len(months))})", months)}
+    per_month, countries, sectors, groups = Counter(), Counter(), Counter(), Counter()
+    by_country = {cc: {"sectors": Counter(), "groups": Counter()} for cc in GCC}
+    detailed = set()
+    for r in rows:
+        if r["dimension"] == "country" and r["key"] in GCC:
+            per_month[r["month"]] += r["count"]
+            countries[r["key"]] += r["count"]
+        elif r["dimension"] in ("gcc-sector", "gcc-group"):
+            detailed.add(r["month"])
+            cc, value = r["key"].split("|", 1)
+            if value:
+                (sectors if r["dimension"] == "gcc-sector" else groups)[value] += r["count"]
+                by_country[cc]["sectors" if r["dimension"] == "gcc-sector" else "groups"][value] += r["count"]
+    return {
+        "months": [{"month": m, "count": per_month.get(m, 0) if m in counted else None} for m in reversed(months)],
+        "covered": len(counted),
+        "detailed": len(detailed),          # months counted since sectors and gangs were recorded per country
+        "countries": {cc: countries.get(cc, 0) for cc in GCC},
+        "sectors": sectors.most_common(8),
+        "groups": groups.most_common(8),
+        "top_sector": {cc: (v["sectors"].most_common(1) or [(None, 0)])[0] for cc, v in by_country.items()},
+        "top_group": {cc: (v["groups"].most_common(1) or [(None, 0)])[0] for cc, v in by_country.items()},
     }
 
 
