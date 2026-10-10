@@ -82,6 +82,44 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status, starts_at);
 
 -- When each outside lookup last ran, so each one happens at most once a day.
+-- Vulnerability centre (vulns.py).
+CREATE TABLE IF NOT EXISTS kev (            -- CISA's Known Exploited Vulnerabilities catalogue, refreshed daily
+    cve_id          TEXT PRIMARY KEY,
+    vendor          TEXT NOT NULL,
+    product         TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    description     TEXT,
+    date_added      TEXT NOT NULL,          -- YYYY-MM-DD
+    due_date        TEXT,                   -- deadline for US federal agencies to fix it
+    required_action TEXT,
+    ransomware      INTEGER NOT NULL DEFAULT 0,  -- CISA knows of ransomware campaigns using it
+    notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_kev_added ON kev(date_added);
+CREATE TABLE IF NOT EXISTS epss (           -- FIRST's daily estimate of exploitation in the next 30 days
+    cve_id      TEXT PRIMARY KEY,
+    score       REAL NOT NULL,              -- probability, 0 to 1
+    percentile  REAL NOT NULL,              -- share of all scored CVEs at or below this one
+    day         TEXT NOT NULL               -- the date FIRST scored it
+);
+CREATE TABLE IF NOT EXISTS cve_details (    -- NVD's description and fix links, for the CVE pages
+    cve_id      TEXT PRIMARY KEY,
+    found       INTEGER NOT NULL,           -- 0 = NVD has no record (yet)
+    description TEXT,
+    cvss        REAL,
+    published   TEXT,
+    refs        TEXT,                       -- JSON list of {url, tags}: patches and vendor advisories
+    checked_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cve_lookups (    -- live lookups from the CVE page, kept two days for rate limits
+    visitor     TEXT NOT NULL,              -- keyed hash of the IP, as for events; never the IP itself
+    at          TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS meta (           -- small facts about the database, like when the collector last ran
+    key         TEXT PRIMARY KEY,
+    value       TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS lookups (
     kind        TEXT NOT NULL,          -- 'prices', 'sec', 'companies'
     key         TEXT NOT NULL,          -- ticker, CIK, or 'all'
@@ -111,6 +149,34 @@ def _migrate(conn):
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
     conn.commit()
+
+
+def get_meta(conn, key):
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else None
+
+
+def set_meta(conn, key, value):
+    conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (key, value))
+    conn.commit()
+
+
+def mark_collected(conn):
+    """Record the end of a collector run. Pages use it for "Updated 12:41" and to know when
+    their cached stories are stale. (Not the file's modification time: CVE lookups and event
+    submissions write to the database too.)"""
+    set_meta(conn, "collected_at", datetime.now(timezone.utc).isoformat())
+
+
+def last_collected(conn):
+    """When the collector last finished, or the file's modification time for a database
+    from before this was recorded. None if there's no database yet."""
+    value = get_meta(conn, "collected_at")
+    if value:
+        return datetime.fromisoformat(value)
+    if DB_PATH.exists():
+        return datetime.fromtimestamp(DB_PATH.stat().st_mtime, timezone.utc)
+    return None
 
 
 def connect():

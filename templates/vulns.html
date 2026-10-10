@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Vulnerabilities · SentryFeed{% endblock %}
+
+{% set months = {"01": "Jan", "02": "Feb", "03": "Mar", "04": "Apr", "05": "May", "06": "Jun", "07": "Jul", "08": "Aug", "09": "Sep", "10": "Oct", "11": "Nov", "12": "Dec"} %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .v-head { margin: 28px 0 18px; }
+  .v-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 6px; }
+  .standfirst { font: 18px/1.5 var(--serif); margin: 0; max-width: 62ch; }
+
+  .lookup { border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); padding: 16px 0 14px; }
+  .lookup label { display: block; font: 700 20px var(--serif); margin-bottom: 8px; }
+  .field { display: flex; gap: 8px; max-width: 560px; }
+  .field input { flex: 1; min-width: 0; border: 2px solid var(--ink); background: var(--bg); color: var(--ink); padding: 10px 12px; font: 17px var(--mono); }
+  .field button { border: 2px solid var(--ink); background: var(--ink); color: var(--bg); padding: 0 22px; min-height: 48px; font-weight: 700; cursor: pointer; }
+  .field button:hover { background: transparent; color: var(--ink); }
+  .help { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .error { color: var(--red); margin: 8px 0 0; }
+
+  /* The three questions: one line each, so CVSS, EPSS and KEV stop being confused */
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 32px; margin: 24px 0 0; }
+  .three div { border-top: 1px solid var(--rule); padding-top: 10px; }
+  .three h2 { font: 700 19px/1.25 var(--serif); margin: 0 0 4px; }
+  .three p { margin: 0; font-size: 15px; }
+
+  .section { margin-top: 48px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; margin-bottom: 14px; }
+  .section h2 { font: 700 26px/1.2 var(--serif); margin: 0; }
+  .section-note { color: var(--muted); font-size: 14px; margin: 0; max-width: 62ch; }
+
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 0 0 14px; font-size: 15px; }
+  .filters input[type="search"] { border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 8px 10px; min-height: 44px; font: 15px var(--sans); width: 220px; max-width: 100%; }
+  .filters .check { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; }
+  .filters .check input { width: 18px; height: 18px; accent-color: var(--ink); }
+  .stack-filter { min-height: 44px; padding: 0 14px; border: 1px solid var(--rule); background: none; font: 600 14px var(--sans); cursor: pointer; }
+  .stack-filter[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+  .filter-count { color: var(--muted); font-size: 14px; }
+
+  .kev-list { list-style: none; margin: 0; padding: 0; }
+  .kev-list li { display: grid; grid-template-columns: 52px 1fr; gap: 14px; padding: 12px 0 14px; border-bottom: 1px solid var(--rule); }
+  .added { text-align: center; padding-top: 2px; }
+  .added .d { display: block; font: 700 26px/1 var(--serif); }
+  .added .m { display: block; font: 600 12px var(--sans); color: var(--muted); margin-top: 2px; }
+  .kick { margin: 0 0 3px; font-size: 14px; color: var(--muted); }
+  .cve { font: 13.5px var(--mono); color: var(--ink); }
+  .kev-list h3 { font: 700 19px/1.25 var(--serif); margin: 0 0 5px; }
+  .kev-list h3 a { text-decoration: none; } .kev-list h3 a:hover { text-decoration: underline; }
+  .meta { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; font-size: 14px; color: var(--muted); }
+  .meta .soon { color: var(--red); font-weight: 600; }
+  .meta .ransom { color: var(--red); font-weight: 600; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); margin: 8px 0; }
+  /* The ten newest first; filtering always searches the whole list. */
+  .kev-list.collapsed:not(.filtered) li.extra { display: none; }
+  .kev-list.filtered ~ .more-bar { display: none; }
+  .more-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; padding: 10px 0; color: var(--muted); font-size: 14px; }
+  .more-button { min-height: 44px; padding: 0 18px; background: none; border: 1px solid var(--ink); font: 600 15px var(--sans); cursor: pointer; }
+  .more-button:hover { background: var(--ink); color: var(--bg); }
+
+  .likely { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .likely th { text-align: left; font-weight: 600; font-size: 13px; color: var(--muted); padding: 0 12px 8px 0; border-bottom: 1px solid var(--rule); }
+  .likely td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .likely .num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .bar { display: block; width: 90px; height: 6px; margin-top: 5px; background: var(--raised); }
+  .bar rect { fill: var(--ink); }
+  .listed { color: var(--red); font-weight: 600; }
+  .likely .story a { text-decoration: none; } .likely .story a:hover { text-decoration: underline; }
+
+  .sources { margin-top: 40px; font-size: 13px; color: var(--muted); max-width: 80ch; }
+
+  @media (max-width: 860px) { .three { grid-template-columns: 1fr; gap: 12px; } }
+  @media (max-width: 600px) {
+    .field { flex-direction: column; }
+    .likely .opt { display: none; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="v-head">
+    <h1>Vulnerabilities</h1>
+    <p class="standfirst">Which flaws attackers are using right now, how likely the rest are to be used, and how bad each one would be.</p>
+  </div>
+
+  <form class="lookup" action="/vulns" method="get" role="search">
+    <label for="cve">Look up a CVE</label>
+    <div class="field">
+      <input id="cve" name="cve" placeholder="CVE-2026-12345" autocomplete="off" spellcheck="false" autocapitalize="characters"
+             value="{{ asked or '' }}" aria-describedby="cve-help{% if asked is not none %} cve-error{% endif %}">
+      <button type="submit">Look up</button>
+    </div>
+    <p class="help" id="cve-help">Any CVE ID. Only the ID is passed on, to NVD and FIRST, and nothing about you.</p>
+    {% if asked is not none %}<p class="error" id="cve-error" role="alert">That isn't a CVE ID. They look like CVE-2026-12345.</p>{% endif %}
+  </form>
+
+  <section class="three" aria-label="Three questions about any flaw">
+    <div><h2>How bad would it be?</h2><p><b>CVSS</b>: a score out of 10 for the damage if the flaw is used. A high score doesn't mean anyone is using it.</p></div>
+    <div><h2>How likely is it to be used?</h2><p><b>EPSS</b>, from FIRST: the estimated chance it's exploited in the next 30 days, updated daily.</p></div>
+    <div><h2>Is it already being used?</h2><p><b>KEV</b>: CISA's list of flaws seen in real attacks. If one you run is on it, patch it first.</p></div>
+  </section>
+
+{% if error %}
+  <p class="empty">SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+{% else %}
+  <section class="section" aria-labelledby="h-kev">
+    <div class="section-head">
+      <h2 id="h-kev">Newly exploited</h2>
+      <p class="section-note">Added to CISA's Known Exploited Vulnerabilities list in the last 30 days: {{ data.recent|length }} of the {{ data.kev_total }} on it. The deadlines are for US government agencies, and a good benchmark for anyone.</p>
+    </div>
+    {% if data.recent %}
+    <div class="filters" id="kev-filters" hidden>
+      <label class="sr-only" for="kev-search">Filter by vendor or product</label>
+      <input id="kev-search" type="search" placeholder="Vendor or product" autocomplete="off">
+      <label class="check"><input type="checkbox" id="kev-ransom"> Used by ransomware</label>
+      <button type="button" class="stack-filter" id="kev-stack" aria-pressed="false" hidden>My stack</button>
+      <span class="filter-count" id="kev-count" aria-live="polite"></span>
+    </div>
+    <ol class="kev-list" id="kev-list">
+      {% for k in data.recent %}
+      <li class="{{ 'extra' if loop.index > 10 }}" data-text="{{ (k.vendor ~ ' ' ~ k.product ~ ' ' ~ k.name ~ ' ' ~ k.cve_id) | lower }}" data-ransom="{{ k.ransomware }}" data-products="{{ k.products | join(' ') }}">
+        <div class="added" aria-label="Added {{ k.date_added }}"><span class="d" aria-hidden="true">{{ k.date_added[8:10] | int }}</span><span class="m" aria-hidden="true">{{ months[k.date_added[5:7]] }}</span></div>
+        <div>
+          <p class="kick"><a class="cve" href="/vulns/{{ k.cve_id }}">{{ k.cve_id }}</a> · {{ k.vendor }} {{ k.product }}</p>
+          <h3><a href="/vulns/{{ k.cve_id }}">{{ k.name }}</a></h3>
+          <p class="meta">
+            {% if k.due %}<span class="{{ 'soon' if k.due in ('due today', 'due tomorrow') }}">{{ k.due[0] | upper }}{{ k.due[1:] }}</span>{% endif %}
+            {% if k.ransomware %}<span class="ransom">Used by ransomware</span>{% endif %}
+            <span>Chance of use: {{ k.epss_text or "not scored yet" }}</span>
+            {% if k.stories %}<span>{{ ui.plural(k.stories, "story", "stories") }} on SentryFeed</span>{% endif %}
+          </p>
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if data.recent|length > 10 %}
+    <p class="more-bar" id="kev-more" hidden>
+      <span id="kev-more-note">Showing the 10 newest of {{ data.recent|length }}.</span>
+      <button type="button" class="more-button" id="kev-more-button" aria-controls="kev-list" aria-expanded="false">Show all {{ data.recent|length }}</button>
+    </p>
+    {% endif %}
+    <p class="empty" id="kev-none" hidden>Nothing in the last 30 days matches. Clear the filters to see them all.</p>
+    {% elif data.kev_total %}
+    <p class="empty">CISA hasn't added anything in the last 30 days.</p>
+    {% else %}
+    <p class="empty">CISA's list hasn't been downloaded yet. The collector fetches it once a day; on the Pi, <code>python vulns.py</code> fetches it now.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="h-likely">
+    <div class="section-head">
+      <h2 id="h-likely">In this week's news, most likely to be used</h2>
+      <p class="section-note">CVEs named in the last {{ news_days }} days of security stories, ranked by EPSS.</p>
+    </div>
+    {% if data.news %}
+    <table class="likely">
+      <thead><tr><th scope="col">CVE</th><th scope="col">Chance of use in 30 days</th><th scope="col" class="opt">Rated</th><th scope="col">On CISA's list</th><th scope="col" class="opt">In the story</th></tr></thead>
+      <tbody>
+      {% for r in data.news %}
+      <tr>
+        <td><a class="cve" href="/vulns/{{ r.cve_id }}">{{ r.cve_id }}</a></td>
+        <td class="num">{% if r.epss is not none %}{{ r.epss_text }}<svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect width="{{ [r.epss * 100, 0.5] | max }}" height="6"/></svg>{% else %}Not scored yet{% endif %}</td>
+        <td class="num opt">{% if r.cvss is not none %}{{ r.cvss }} of 10{% else %}Not yet{% endif %}</td>
+        <td>{% if r.kev %}<span class="listed">Yes</span>{% else %}No{% endif %}</td>
+        <td class="opt story">{% if r.story.link %}<a href="{{ r.story.link }}" rel="noopener noreferrer">{{ r.story.headline }}</a>{% else %}{{ r.story.headline }}{% endif %}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="empty">No security story in the last {{ news_days }} days named a CVE.</p>
+    {% endif %}
+  </section>
+{% endif %}
+
+  <p class="sources">Exploited flaws from <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" rel="noopener noreferrer">CISA's KEV catalogue</a>. Chance of exploitation from <a href="https://www.first.org/epss/" rel="noopener noreferrer">EPSS by FIRST</a>. Descriptions and scores from the <a href="https://nvd.nist.gov" rel="noopener noreferrer">NVD</a>. This product uses the NVD API but is not endorsed or certified by the NVD.</p>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const list = document.getElementById("kev-list");
+  if (!list) return;
+  const rows = Array.from(list.querySelectorAll("li"));
+  const search = document.getElementById("kev-search");
+  const ransom = document.getElementById("kev-ransom");
+  const stackButton = document.getElementById("kev-stack");
+  const count = document.getElementById("kev-count");
+  const none = document.getElementById("kev-none");
+  document.getElementById("kev-filters").hidden = false;
+
+  // Without JavaScript the whole list shows; with it, the ten newest first.
+  const more = document.getElementById("kev-more");
+  if (more) {
+    const button = document.getElementById("kev-more-button");
+    const note = document.getElementById("kev-more-note");
+    list.classList.add("collapsed");
+    more.hidden = false;
+    button.addEventListener("click", () => {
+      const opening = list.classList.contains("collapsed");
+      list.classList.toggle("collapsed", !opening);
+      button.setAttribute("aria-expanded", String(opening));
+      button.textContent = opening ? "Show fewer" : "Show all " + rows.length;
+      note.textContent = opening ? "Showing all " + rows.length + "." : "Showing the 10 newest of " + rows.length + ".";
+      if (!opening) more.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  // My stack: the products picked on /stack, kept only in this browser.
+  let mine = new Set();
+  try { mine = new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]")); } catch (e) { /* none */ }
+  let stackOn = false;
+  if (mine.size) {
+    stackButton.hidden = false;
+    stackButton.addEventListener("click", () => {
+      stackOn = !stackOn;
+      stackButton.setAttribute("aria-pressed", String(stackOn));
+      apply();
+    });
+  }
+
+  function apply() {
+    const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    rows.forEach((li) => {
+      const match = words.every((w) => li.dataset.text.includes(w))
+        && (!ransom.checked || li.dataset.ransom === "1")
+        && (!stackOn || li.dataset.products.split(" ").some((p) => p && mine.has(p)));
+      li.hidden = !match;
+      if (match) shown += 1;
+    });
+    none.hidden = shown > 0;
+    const filtering = words.length || ransom.checked || stackOn;
+    list.classList.toggle("filtered", !!filtering);
+    count.textContent = filtering ? "Showing " + shown + " of " + rows.length : "";
+  }
+  search.addEventListener("input", apply);
+  ransom.addEventListener("change", apply);
+})();
+</script>
+{% endblock %}

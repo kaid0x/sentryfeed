@@ -12,16 +12,17 @@ from urllib.parse import urlparse
 import sqlite3
 
 import requests
-from flask import Flask, Response, g, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, g, jsonify, redirect, render_template, request, url_for
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from db import DB_PATH, connect
+from db import connect, last_collected
 from dedupe import group_stories
 from geo import locate
 import briefing
 import events
 import stack
 import stocks
+import vulns
 
 SECRET_FILE = Path(__file__).with_name(".flask_secret")
 
@@ -119,16 +120,15 @@ def load_items_ungrouped(days):
 # What the page needs about each other outlet covering a story.
 ALSO_FIELDS = ("id", "source", "title", "link", "age", "published", "match")
 
-# Grouped stories per window, kept until the database changes. Grouping takes a few
-# seconds on the Pi, and the stories only change when the collector runs (or an event
-# is submitted), which always rewrites the database file.
+# Grouped stories per window, kept until the collector runs again. Grouping takes a few
+# seconds on the Pi, and the stories only change when the collector runs.
 _STORY_CACHE = {}
 
 
 def load_items(days):
     """One entry per story, ready for the pages (see _group_items). Each call gets its
     own copy, with ages worked out afresh and anything older than the window dropped."""
-    stamp = DB_PATH.stat().st_mtime if DB_PATH.exists() else None
+    stamp = collected_time()
     cached = _STORY_CACHE.get(days)
     if cached is None or cached[0] != stamp:
         cached = (stamp, _group_items(days))
@@ -166,13 +166,21 @@ def _group_items(days):
     return stories
 
 
+def collected_time():
+    """When the collector last finished (db.last_collected), read once per request."""
+    if "collected" not in g:
+        conn = connect()
+        try:
+            g.collected = last_collected(conn)
+        finally:
+            conn.close()
+    return g.collected
+
+
 def last_updated():
-    """Every collector run rewrites severities, so the database file's
-    modification time is the time of the last run."""
-    if not DB_PATH.exists():
-        return None
-    mtime = datetime.fromtimestamp(DB_PATH.stat().st_mtime, timezone.utc)
-    return ago(mtime.isoformat(), datetime.now(timezone.utc))
+    """ "12m ago" since the collector last finished, or None before the first run."""
+    when = collected_time()
+    return ago(when.isoformat(), datetime.now(timezone.utc)) if when else None
 
 
 def window_days(default=DEFAULT_DAYS):
@@ -188,9 +196,8 @@ def make_csp_nonce():
 @app.context_processor
 def inject_page_basics():
     """What every page's masthead, menus and footer need."""
-    collected = None
-    if DB_PATH.exists():
-        collected = datetime.fromtimestamp(DB_PATH.stat().st_mtime, timezone.utc).astimezone(briefing.DUBAI)
+    when = collected_time()
+    collected = when.astimezone(briefing.DUBAI) if when else None
     return {
         "csp_nonce": g.get("csp_nonce", ""),
         "site_nav": briefing.NAV,
@@ -390,6 +397,71 @@ def events_page():
     for e in upcoming:
         e["url"] = safe_link(e["url"])
     return render_template("events.html", events=upcoming, kinds=events.KINDS)
+
+
+VULN_NEWS_DAYS = 7
+
+
+@app.route("/vulns")
+def vulnerabilities():
+    # The lookup form sends ?cve=...; a valid ID goes to its own page, anything else is explained here.
+    asked = request.args.get("cve")
+    if asked is not None:
+        cve_id = vulns.normalise(asked)
+        if cve_id:
+            return redirect(url_for("vulnerability", cve_id=cve_id), code=303)
+
+    def build():
+        conn = connect()
+        try:
+            recent = vulns.recent_kev(conn)
+            for row in recent:
+                row["due"] = vulns.due_words(row["due_date"])
+                row["epss_text"] = vulns.epss_words(row["epss"])
+                row["products"] = stack.match({"title": f"{row['vendor']} {row['product']}", "summary": row["name"]})
+                row["stories"] = len(vulns.stories_mentioning(conn, row["cve_id"]))
+            stories = [s for s in load_items(VULN_NEWS_DAYS) if s["severity"] in briefing.SECURITY]
+            news = vulns.news_by_likelihood(conn, stories)
+            for row in news:
+                row["epss_text"] = vulns.epss_words(row["epss"])
+            return {"recent": recent, "kev_total": vulns.kev_total(conn), "news": news}
+        finally:
+            conn.close()
+
+    page = page_or_unavailable("vulns.html", build, active="vulns", news_days=VULN_NEWS_DAYS,
+                               asked=asked, stack_names=stack.NAMES)
+    return (page, 400) if asked is not None and isinstance(page, str) else page
+
+
+@app.route("/vulns/<cve_id>")
+def vulnerability(cve_id):
+    normal = vulns.normalise(cve_id)
+    if not normal:
+        abort(404)
+    if normal != cve_id:
+        return redirect(url_for("vulnerability", cve_id=normal), code=301)
+    conn = connect()
+    try:
+        kev = conn.execute("SELECT * FROM kev WHERE cve_id = ?", (cve_id,)).fetchone()
+        details, score, note = vulns.look_up(conn, cve_id, events.visitor_key(app.config["SECRET_KEY"], visitor_address()))
+        stories = vulns.stories_mentioning(conn, cve_id)
+    finally:
+        conn.close()
+    for s in stories:
+        s["link"] = safe_link(s["link"])
+        s["headline"] = briefing.clean_title(s)
+    if details:
+        details["refs"] = [r for r in details["refs"] if safe_link(r["url"])]
+    kev = dict(kev) if kev else None
+    if kev:
+        kev["due"] = vulns.due_words(kev["due_date"])
+        kev["notes_links"] = [u for u in (n.strip() for n in (kev["notes"] or "").split(";")) if safe_link(u)]
+    # A heading in words: CISA's name for the flaw, or Microsoft's (one advisory per CVE, so its
+    # title names this flaw; other outlets' headlines can cover several and aren't used).
+    title = kev["name"] if kev else next((s["headline"] for s in stories if s["source"] == "Microsoft MSRC"), None)
+    return render_template("vuln.html", active="vulns", cve_id=cve_id, kev=kev, details=details, score=score, title=title,
+                           note=note, stories=stories, epss_text=vulns.epss_words(score["score"]) if score else None,
+                           percentile_text=vulns.percentile_words(score["percentile"]) if score else None)
 
 
 def visitor_address():

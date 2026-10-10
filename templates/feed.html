@@ -212,9 +212,7 @@
     cves.replaceChildren();
     for (const id of item.cves) {
       const a = document.createElement("a");
-      a.href = "https://nvd.nist.gov/vuln/detail/" + encodeURIComponent(id);
-      a.target = "_blank";
-      a.rel = "noopener noreferrer";
+      a.href = "/vulns/" + encodeURIComponent(id);
       a.textContent = id;
       cves.append(a);
     }

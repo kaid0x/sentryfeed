@@ -41,12 +41,33 @@ app.py ──> dedupe.py   group the same story from different outlets
        └─> briefing.py the front page and map page, and the plain wording
 
 collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
+           └──> vulns.py    CISA's exploited list and EPSS scores, once a day
 ```
 
 - **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review, and three Gulf sources: The National (technology), Tahawultech and Security Middle East. The list lives in `feeds.py`.
 - **Gulf sources are filtered.** They mix cybersecurity with general tech, vendor and physical-security news (locks, CCTV), so feeds marked `cyber-only` keep only items whose title, summary or tags look like cybersecurity. Plain "security" isn't enough to pass. Gulf News, Khaleej Times and Arab News only offer general news feeds (around 200 items a day), so they aren't used.
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
+
+## Vulnerabilities
+
+`/vulns` answers three questions about a flaw, each from its own source:
+
+| Question | Source | In plain words |
+|---|---|---|
+| How bad would it be? | CVSS, from the NVD | "Rated 9.8 out of 10" |
+| How likely is it to be used? | [EPSS](https://www.first.org/epss/) by FIRST | "About a 1% chance of being exploited in the next 30 days, higher than 61% of all scored flaws" |
+| Is it already being used? | CISA's [Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) catalogue | "Yes: due tomorrow for US government agencies" |
+
+- **Look up a CVE:** any CVE ID gets its own page (`/vulns/CVE-2026-72979`) with all three answers, NVD's description, links to patches and vendor advisories, what CISA says to do, and the SentryFeed stories that mention it. CVE IDs anywhere on the site link there.
+- **Newly exploited:** everything CISA added in the last 30 days, newest first, with the deadline, ransomware use and EPSS, filterable by vendor, ransomware and My stack. The deadlines bind US government agencies; the page says so, and they're a good benchmark for anyone.
+- **In this week's news, most likely to be used:** the CVEs in the last 7 days of security stories, ranked by EPSS, with KEV ones marked.
+
+`vulns.py` runs as a collector step once a day: it downloads CISA's catalogue (about 1.8 MB), fetches EPSS scores for the catalogue and recent news CVEs (100 per request), and fills in NVD descriptions for recent additions. The catalogue also feeds the scoring: a story mentioning a flaw on CISA's list goes red in the same run, without waiting for NVD to catch up. Run `python vulns.py` to refresh now.
+
+A CVE nobody has asked about is looked up live, from NVD and FIRST, and saved. Only the CVE ID is sent; the visitor's address never leaves the Pi. Live lookups are capped at 30 per visitor per hour and 500 a day in total (counted with the same keyed hash of the IP as event submissions, never the IP itself), so a crawler can't run up the NVD key's quota.
+
+This product uses the NVD API but is not endorsed or certified by the NVD.
 
 ## Password check
 
@@ -169,12 +190,12 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 
 ## Design decisions
 
-- **CISA's RSS feeds were discontinued.** Instead of a separate CISA source, KEV status comes from the `cisaExploitAdd` field in NVD's CVE records, the same API call that returns the score.
+- **CISA's RSS feeds were discontinued.** KEV status comes from two places: the `cisaExploitAdd` field in NVD's CVE records (the same API call that returns the score), and CISA's own catalogue, downloaded daily, which is often days ahead of NVD.
 - **Feed content is treated as untrusted input.** Jinja escapes everything in the list, the detail panel only writes text with `textContent`, and any link that isn't `http` or `https` is dropped, so a compromised feed can't inject script or a `javascript:` link. Tested with a planted `<script>` headline.
 - **The Pi 3B has 1 GB of RAM**, so there is no framework beyond Flask, no JavaScript build step, and the collector runs as a one-shot job instead of a resident process.
 - **A strict Content Security Policy.** Every page gets a fresh random nonce, and only scripts and styles carrying it may run. Pages may only connect back to this server, so the password page physically can't send anything elsewhere.
 - **Designed like a newspaper.** The front page is a briefing, not a dashboard: serif headlines (system fonts only, since the security policy allows no web fonts), warm paper and ink colours, and severity shown as a coloured word before each headline ("Major.") rather than badges. Light and dark themes both work; the first visit follows the device's setting, a choice is remembered in the browser, and a small script in the page head sets it before anything is drawn, so there's no flash of the wrong theme. Every page shares the same masthead, grouped menus (Intel, Tools, Community; planned pages are named but not linked) and footer.
-- **Grouped stories are cached until the database changes.** Grouping the same story across outlets takes a few seconds on the Pi. The stories only change when the collector runs, which rewrites the database file, so the grouped stories are kept until the file changes and only the "5m ago" ages are worked out on each visit.
+- **Grouped stories are cached until the collector runs again.** Grouping the same story across outlets takes a few seconds on the Pi, and the stories only change when the collector runs. Each run records when it finished, so the grouped stories are kept until the next run and only the "5m ago" ages are worked out on each visit. (Not the database file's modification time: CVE lookups and event submissions write to it too.)
 - **Pages are compressed, except where that could leak a secret.** Gzip shrinks the map pages to about a third. The event form page is left uncompressed: it shows back what a visitor typed next to a form token, which is the setup the BREACH attack uses to guess secrets from response sizes.
 - **systemd over cron.** It keeps the dashboard alive, restarts it on failure, starts it on boot, and logs every collector run to the journal. Both units are sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`) so they can only write inside the project folder.
 

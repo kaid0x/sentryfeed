@@ -93,7 +93,7 @@ FOOTER = [
 # named in the menu but not linked, so nothing in the menu leads nowhere.
 NAV = [
     ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
-               ("My stack", "/stack", "stack"), ("Vulnerabilities", None, None),
+               ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
                ("Ransomware stats", None, None), ("Weekly digest", None, None), ("Gulf pulse", None, None)]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", None, None), ("Domain check", None, None)]),

@@ -12,7 +12,7 @@
   {% if s.blamed %}<span class="blamed">Blamed: {{ s.blamed | map("country") | join(", ") }}</span>{% endif %}
   {% if long and s.stock %}<span>{{ s.stock.company }} ({{ s.stock.display_ticker }}) is listed</span>{% endif %}
 </p>
-{% if s.cves and not s.get("items") %}<p class="cves">{% for c in s.cves[:4] %}<a href="https://nvd.nist.gov/vuln/detail/{{ c }}" rel="noopener noreferrer">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
+{% if s.cves and not s.get("items") %}<p class="cves">{% for c in s.cves[:4] %}<a href="/vulns/{{ c }}">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
 {% endmacro %}
 
 {% macro headline(s, tag="h3", cls="") %}
@@ -184,7 +184,7 @@
   <section class="section" aria-labelledby="h-exploited">
     <div class="section-head">
       <h2 id="h-exploited">Being exploited now</h2>
-      <p class="section-note">Last 7 days. Flaws on CISA's Known Exploited Vulnerabilities list, or that the story says are already being used.</p>
+      <p class="section-note">Last 7 days. Flaws on CISA's Known Exploited Vulnerabilities list, or that the story says are already being used. <a href="/vulns">Everything CISA added recently</a>.</p>
     </div>
     {% if data.exploited %}
     <ol class="numbered">

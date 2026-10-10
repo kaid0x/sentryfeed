@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -49,23 +50,49 @@ def best_score(metrics):
     return None
 
 
-def lookup(cve_id, key):
-    """Returns (score or None, is_in_cisa_kev)."""
+# Reference tags that point at a fix or the vendor's own write-up, shown on the CVE pages.
+FIX_TAGS = {"Patch", "Vendor Advisory", "Mitigation"}
+MAX_REFS = 6
+
+
+def lookup(cve_id, key, timeout=20):
+    """What NVD knows about one CVE: {found, cvss, kev, description, published, refs}."""
     headers = {"User-Agent": "SentryFeed/0.1"}
     if key:
         headers["apiKey"] = key
-    resp = requests.get(NVD_URL, params={"cveId": cve_id}, headers=headers, timeout=20)
+    resp = requests.get(NVD_URL, params={"cveId": cve_id}, headers=headers, timeout=timeout)
     if resp.status_code in (403, 429, 503):
         raise RateLimited(resp.status_code)
+    nothing = {"found": False, "cvss": None, "kev": False, "description": None, "published": None, "refs": []}
     if resp.status_code == 404:
-        return None, False
+        return nothing
     resp.raise_for_status()
 
     vulns = resp.json().get("vulnerabilities") or []
     if not vulns:
-        return None, False  # reserved or not yet published in NVD
+        return nothing  # reserved or not yet published in NVD
     cve = vulns[0]["cve"]
-    return best_score(cve.get("metrics", {})), "cisaExploitAdd" in cve
+    description = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), None)
+    refs = [{"url": r["url"], "tags": sorted(FIX_TAGS & set(r.get("tags") or []))}
+            for r in cve.get("references", []) if FIX_TAGS & set(r.get("tags") or [])][:MAX_REFS]
+    return {"found": True, "cvss": best_score(cve.get("metrics", {})), "kev": "cisaExploitAdd" in cve,
+            "description": description, "published": cve.get("published"), "refs": refs}
+
+
+def save_lookup(conn, cve_id, found):
+    """Keep a lookup's score for the stories, and its description and fix links for the CVE pages."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "INSERT OR REPLACE INTO cve_cache (cve_id, cvss, kev, checked_at) VALUES (?, ?, ?, ?)",
+        (cve_id, found["cvss"], int(found["kev"]), now),
+    )
+    conn.execute(
+        """INSERT OR REPLACE INTO cve_details (cve_id, found, description, cvss, published, refs, checked_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (cve_id, int(found["found"]), found["description"], found["cvss"], found["published"],
+         json.dumps(found["refs"]), now),
+    )
+    conn.commit()
 
 
 def tag_items(conn):
@@ -113,7 +140,7 @@ def lookup_pending(conn):
 
     for cve_id in pending[: pace["budget"]]:
         try:
-            score, kev = lookup(cve_id, key)
+            found = lookup(cve_id, key)
         except RateLimited as e:
             print(f"  ! NVD rate limit ({e}); the rest will be looked up next run")
             break
@@ -121,11 +148,7 @@ def lookup_pending(conn):
             print(f"  ! NVD unreachable ({e}); the rest will be looked up next run")
             break
 
-        conn.execute(
-            "INSERT OR REPLACE INTO cve_cache (cve_id, cvss, kev, checked_at) VALUES (?, ?, ?, ?)",
-            (cve_id, score, int(kev), datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
+        save_lookup(conn, cve_id, found)
         done += 1
         time.sleep(pace["delay"])
 
@@ -133,14 +156,18 @@ def lookup_pending(conn):
 
 
 def roll_up(conn):
-    """Copy CVE results onto items: highest score, and KEV if any CVE is flagged."""
+    """Copy CVE results onto items: highest score, and KEV if any CVE is flagged, either by NVD
+    or in CISA's own catalogue (vulns.py downloads it daily; NVD can take days to catch up)."""
     cache = {r["cve_id"]: r for r in conn.execute("SELECT cve_id, cvss, kev FROM cve_cache")}
+    listed = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev")}
     for row in conn.execute("SELECT id, cves FROM items WHERE cves != ''").fetchall():
-        hits = [cache[c] for c in row["cves"].split(",") if c in cache]
+        ids = row["cves"].split(",")
+        hits = [cache[c] for c in ids if c in cache]
         scores = [h["cvss"] for h in hits if h["cvss"] is not None]
+        kev = any(h["kev"] for h in hits) or any(c in listed for c in ids)
         conn.execute(
             "UPDATE items SET cvss = ?, kev = ? WHERE id = ?",
-            (max(scores) if scores else None, int(any(h["kev"] for h in hits)), row["id"]),
+            (max(scores) if scores else None, int(kev), row["id"]),
         )
     conn.commit()
 

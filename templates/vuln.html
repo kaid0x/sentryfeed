@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}{{ cve_id }}{% if title %}: {{ title }}{% endif %} · SentryFeed{% endblock %}
+
+{% set cvss = details.cvss if details else none %}
+{% set band = none if cvss is none else ("critical" if cvss >= 9 else "high" if cvss >= 7 else "medium" if cvss >= 4 else "low") %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .crumb { margin: 24px 0 0; font-size: 14px; }
+  .kicker { margin: 14px 0 6px; font-size: 15px; color: var(--muted); }
+  .kicker strong { color: var(--sev, var(--ink)); font: 700 16px var(--serif); }
+  .vuln h1 { font: 700 clamp(28px, 4vw, 44px)/1.12 var(--serif); letter-spacing: -0.015em; margin: 0 0 6px; max-width: 30ch; }
+  .cve-id { font: 15px var(--mono); color: var(--muted); margin: 0 0 20px; }
+  .note { border-left: 3px solid var(--yellow); padding: 6px 12px; margin: 0 0 20px; max-width: 70ch; } /* the stripe marks a warning */
+
+  /* Three answers side by side: how bad, how likely, already happening */
+  .answers { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); }
+  .answer { padding: 14px 20px 16px 0; }
+  .answer + .answer { border-left: 1px solid var(--rule); padding-left: 20px; }
+  .answer h2 { font: 600 14px var(--sans); color: var(--muted); margin: 0 0 6px; }
+  .answer .big { font: 700 34px/1.1 var(--serif); margin: 0 0 6px; }
+  .answer .big small { font: 400 17px var(--serif); color: var(--muted); }
+  .answer p { margin: 0; font-size: 15px; }
+  .answer.yes .big { color: var(--red); }
+
+  .block { margin-top: 32px; max-width: 72ch; }
+  .block h2 { font: 700 22px var(--serif); margin: 0 0 8px; }
+  .block p { margin: 0 0 10px; font: 18px/1.6 var(--serif); }
+  .block .src { font: 13px var(--sans); color: var(--muted); }
+  .refs, .stories { list-style: none; margin: 0; padding: 0; }
+  .refs li, .stories li { padding: 8px 0; border-bottom: 1px solid var(--rule); }
+  .refs .tags { font-size: 13px; color: var(--muted); margin-left: 8px; }
+  .stories .meta { display: block; font-size: 13px; color: var(--muted); }
+  .stories a { font: 600 17px var(--serif); text-decoration: none; } .stories a:hover { text-decoration: underline; }
+  .elsewhere { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 32px 0 0; }
+  .elsewhere a { display: inline-block; padding: 10px 0; font-weight: 600; }
+  .sources { margin-top: 28px; font-size: 13px; color: var(--muted); max-width: 80ch; }
+
+  @media (max-width: 760px) {
+    .answers { grid-template-columns: 1fr; }
+    .answer + .answer { border-left: 0; padding-left: 0; border-top: 1px solid var(--rule); }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap vuln">
+  <p class="crumb"><a href="/vulns">Vulnerabilities</a></p>
+  <p class="kicker{{ ' sev-red' if kev }}">
+    {% if kev %}<strong>Exploited.</strong> On CISA's list since {{ kev.date_added }}{% if kev.ransomware %}, and used by ransomware{% endif %}.
+    {% elif details and not details.found %}<strong>Not in NVD yet.</strong>
+    {% else %}<strong>Not on CISA's list.</strong>{% endif %}
+  </p>
+  <h1>{{ title or cve_id }}</h1>
+  <p class="cve-id">{% if title %}{{ cve_id }}{% if kev %} · {{ kev.vendor }} {{ kev.product }}{% endif %}{% if details and details.published %} · {% endif %}{% endif %}{% if details and details.published %}Published {{ details.published[:10] }}{% endif %}</p>
+  {% if note %}<p class="note" role="status">{{ note }}</p>{% endif %}
+
+  <section class="answers" aria-label="Three questions about this flaw">
+    <div class="answer">
+      <h2>How bad would it be?</h2>
+      {% if cvss is not none %}
+      <p class="big">{{ cvss }} <small>out of 10</small></p>
+      <p>CVSS rates it {{ band }}{% if cvss >= 9 %}: about as damaging as flaws get{% endif %}.</p>
+      {% else %}
+      <p class="big">Not scored</p>
+      <p>NVD often scores new CVEs a few days after they're published.</p>
+      {% endif %}
+    </div>
+    <div class="answer">
+      <h2>How likely is it to be used?</h2>
+      {% if score %}
+      <p class="big">{{ epss_text }}</p>
+      <p>Estimated chance of exploitation in the next 30 days, {{ percentile_text }} (EPSS, {{ score.day }}).</p>
+      {% else %}
+      <p class="big">No estimate</p>
+      <p>FIRST hasn't scored it, which usually means it's very new.</p>
+      {% endif %}
+    </div>
+    <div class="answer{{ ' yes' if kev }}">
+      <h2>Is it already being used?</h2>
+      {% if kev %}
+      <p class="big">Yes</p>
+      <p>CISA has seen it exploited in real attacks{% if kev.due %}. For US government agencies the fix is {{ kev.due }} ({{ kev.due_date }}){% endif %}.</p>
+      {% else %}
+      <p class="big">Not confirmed</p>
+      <p>It isn't on CISA's list. That doesn't prove nobody uses it: CISA only lists exploitation it has confirmed.</p>
+      {% endif %}
+    </div>
+  </section>
+
+  {% if kev %}
+  <section class="block" aria-labelledby="h-do">
+    <h2 id="h-do">What CISA says to do</h2>
+    {% if kev.required_action %}<p>{{ kev.required_action }}</p>{% endif %}
+    {% if kev.description %}<p>{{ kev.description }}</p>{% endif %}
+    {% if kev.notes_links %}
+    <ul class="refs">{% for url in kev.notes_links %}<li><a href="{{ url }}" rel="noopener noreferrer">{{ url.split('/')[2] }}</a></li>{% endfor %}</ul>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {% if details and details.description %}
+  <section class="block" aria-labelledby="h-desc">
+    <h2 id="h-desc">What the flaw is</h2>
+    <p>{{ details.description }}</p>
+    <p class="src">From the NVD.</p>
+  </section>
+  {% elif details and not details.found %}
+  <section class="block"><p>NVD has no record of {{ cve_id }} yet. The ID may be reserved but not published, or mistyped.</p></section>
+  {% endif %}
+
+  {% if details and details.refs %}
+  <section class="block" aria-labelledby="h-fix">
+    <h2 id="h-fix">Fixes and advisories</h2>
+    <ul class="refs">
+      {% for r in details.refs %}<li><a href="{{ r.url }}" rel="noopener noreferrer">{{ r.url.split('/')[2] }}</a><span class="tags">{{ r.tags | join(", ") }}</span></li>{% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  <section class="block" aria-labelledby="h-stories">
+    <h2 id="h-stories">On SentryFeed</h2>
+    {% if stories %}
+    <ul class="stories">
+      {% for s in stories %}<li>{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.headline }}</a>{% else %}{{ s.headline }}{% endif %}<span class="meta">{{ s.source }}{% if s.published %} · {{ s.published[:10] }}{% endif %}</span></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p>No story in the last 14 days has mentioned it.</p>
+    {% endif %}
+  </section>
+
+  <nav class="elsewhere" aria-label="Elsewhere">
+    <a href="https://nvd.nist.gov/vuln/detail/{{ cve_id }}" rel="noopener noreferrer">NVD record</a>
+    {% if kev %}<a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog?search_api_fulltext={{ cve_id }}" rel="noopener noreferrer">CISA catalogue</a>{% endif %}
+    <a href="https://www.cve.org/CVERecord?id={{ cve_id }}" rel="noopener noreferrer">CVE.org</a>
+  </nav>
+
+  <p class="sources">Exploited flaws from CISA's KEV catalogue. Chance of exploitation from <a href="https://www.first.org/epss/" rel="noopener noreferrer">EPSS by FIRST</a>. Descriptions and scores from the NVD. This product uses the NVD API but is not endorsed or certified by the NVD.</p>
+</main>
+{% endblock %}
