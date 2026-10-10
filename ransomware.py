@@ -105,7 +105,12 @@ def update(conn, log=print):
         try:
             save(conn, month, count(fetch_month(month, key)), source)
         except (requests.RequestException, ValueError) as e:
-            log(f"Ransomware stats: {month} failed ({e.__class__.__name__}); trying again next run")
+            # Say which API and what it answered (never the key), so a failure can be diagnosed.
+            api = "api-pro with the key" if key else "the keyless API"
+            answer = ""
+            if isinstance(e, requests.HTTPError) and e.response is not None:
+                answer = f": it answered {e.response.status_code} {e.response.text[:120].strip()!r}"
+            log(f"Ransomware stats: {month} failed using {api} ({e.__class__.__name__}{answer}); trying again next run")
             break
         done += 1
         if source == "pro" and done < len(wanted):
