@@ -26,6 +26,17 @@
 
   figure { margin: 0; }
   .atlas { display: block; width: 100%; height: auto; aspect-ratio: 960 / 422; background: var(--sea); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); }
+  /* Zoom and drag. The map's own cursor says when it can be dragged. */
+  .atlas-frame { position: relative; }
+  .atlas.zoomed { cursor: grab; }
+  .atlas.dragging { cursor: grabbing; }
+  .atlas:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .atlas:focus:not(:focus-visible) { outline: none; } /* mouse users dragging the map get no ring; keyboard users keep the one above */
+  .zoom { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column; border: 1px solid var(--ink); background: var(--bg); }
+  .zoom button { width: 44px; height: 44px; border: 0; background: none; font: 600 22px/1 var(--sans); cursor: pointer; }
+  .zoom button + button { border-top: 1px solid var(--ink); }
+  .zoom button:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+  .zoom button:disabled { color: var(--muted); cursor: default; }
   .atlas .country { fill: var(--atlas-land); stroke: var(--atlas-edge); stroke-width: 0.6px; vector-effect: non-scaling-stroke; }
   .atlas .country.dot { display: none; }
   .atlas .country.selected { stroke: var(--ink); stroke-width: 2.2px; }
@@ -122,7 +133,8 @@
   </div>
 
   <figure>
-    <svg id="b-map" class="atlas" viewBox="0 -2 960 422" preserveAspectRatio="xMidYMid meet" role="group" aria-label="World map of this week's stories. Use the country list below to explore it by keyboard.">
+    <div class="atlas-frame">
+    <svg id="b-map" class="atlas" viewBox="0 -2 960 422" data-world="0 -2 960 422" preserveAspectRatio="xMidYMid meet" tabindex="0" role="group" aria-label="World map of this window's stories. With the map focused, plus and minus zoom, the arrow keys move it, and 0 shows the whole world. The country list below picks countries by keyboard.">
       <defs>
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L10,5 L0,9 z"/></marker>
         <pattern id="hatch" patternUnits="userSpaceOnUse" width="3" height="3" patternTransform="rotate(45)"><line class="hatch-line" x1="0" y1="0" x2="0" y2="3"/></pattern>
@@ -130,12 +142,18 @@
       {{ world }}
       {% for l in data.map.lines %}<path class="link" data-from="{{ l.from }}" data-to="{{ l.to }}" d="{{ l.path }}"/>{% endfor %}
     </svg>
+    <div class="zoom" role="group" aria-label="Zoom">
+      <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+      <button type="button" id="zoom-out" aria-label="Zoom out" disabled>&minus;</button>
+    </div>
+    </div>
     <figcaption>
       <ul class="key" aria-label="Key">
         <li class="sev-red"><span class="sw"></span>Major</li><li class="sev-orange"><span class="sw"></span>Medium</li><li class="sev-yellow"><span class="sw"></span>Low</li>
         <li><span class="sw blame"></span>Blamed</li><li><span class="sw line"></span>Blamed, to targeted</li>
       </ul>
       <span>Each country takes the colour of its most serious story.</span>
+      <span class="zoom-help">Zoom with + and &minus;, a pinch, or Ctrl and scroll, then drag to move.</span>
     </figcaption>
   </figure>
 

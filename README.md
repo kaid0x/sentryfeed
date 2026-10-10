@@ -91,7 +91,7 @@ Every item stores the reason for its colour (`CVSS 9.8`, `CISA: actively exploit
 
 ## Map
 
-`/map` shows where incidents happened and who the reporting blames. It opens on the last 7 days, with a switch for 24 hours to 14 days, and a World/Gulf switch that glides the map to the Gulf.
+`/map` shows where incidents happened and who the reporting blames. It opens on the last 7 days, with a switch for 24 hours to 14 days, and a World/Gulf switch that glides the map to the Gulf. You can zoom in up to 8 times (the + and − buttons, a trackpad pinch, Ctrl and scroll, or two fingers on a phone) and then drag the map around; a plain scroll still scrolls the page, and a drag never counts as picking a country. With the map focused, + and − zoom, the arrow keys move it, and 0 shows the whole world.
 
 - **Where it happened:** the country is filled in the colour of its most serious story, brighter the more stories it has.
 - **Blamed:** a purple outline, or purple hatching for a country that was only blamed. A country counts as blamed when it's attached to attacker wording ("Chinese hackers", "Russia-linked group", "backed by Iran") or when a story names a group publicly tied to it (Lazarus → North Korea, Volt Typhoon → China, APT28 → Russia; any Microsoft "Typhoon", "Blizzard", "Sandstorm" or "Sleet" group). Every other country mentioned counts as where it happened.

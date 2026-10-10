@@ -247,22 +247,137 @@
     if (cc && known.has(cc)) select(cc);
   });
 
-  // World and Gulf views: the viewBox glides between them so you keep your bearings.
-  const views = Array.from(document.querySelectorAll(".views button"));
+  // ---------- Views, zoom and dragging ----------
+  // Everything is the viewBox: zooming shrinks it, dragging slides it, and the World and Gulf
+  // buttons glide it. Views keep the world's shape, so screen and map distances stay in step.
+  const WORLD = map.getAttribute("data-world").split(" ").map(Number);
+  const RATIO = WORLD[2] / WORLD[3];
+  const MAX_ZOOM = 8;
   const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const parse = (v) => v.split(" ").map(Number);
-  views.forEach((b) => b.addEventListener("click", () => {
-    views.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-    const from = parse(map.getAttribute("viewBox")), to = parse(b.dataset.view);
-    if (still || document.hidden) { map.setAttribute("viewBox", b.dataset.view); return; }
+  const views = Array.from(document.querySelectorAll(".views button"));
+  const zoomIn = document.getElementById("zoom-in"), zoomOut = document.getElementById("zoom-out");
+  let box = map.getAttribute("viewBox").split(" ").map(Number);
+  let gliding = 0;
+
+  // A view the world's shape around the same centre, no bigger than the world and no
+  // closer than MAX_ZOOM, slid back inside the world's edges if it strayed.
+  function fit([x, y, w, h]) {
+    const cx = x + w / 2, cy = y + h / 2;
+    let fw = Math.max(w, h * RATIO);
+    fw = Math.min(WORLD[2], Math.max(WORLD[2] / MAX_ZOOM, fw));
+    const fh = fw / RATIO;
+    const fx = Math.min(WORLD[0] + WORLD[2] - fw, Math.max(WORLD[0], cx - fw / 2));
+    const fy = Math.min(WORLD[1] + WORLD[3] - fh, Math.max(WORLD[1], cy - fh / 2));
+    return [fx, fy, fw, fh];
+  }
+  function draw(next) {
+    box = fit(next);
+    map.setAttribute("viewBox", box.map((v) => v.toFixed(2)).join(" "));
+    const zoomed = box[2] < WORLD[2] - 0.5;
+    map.classList.toggle("zoomed", zoomed);
+    // Zoomed in, one finger drags the map; at the whole world it scrolls the page as usual.
+    map.style.touchAction = zoomed ? "none" : "pan-y";
+    if (zoomIn) zoomIn.disabled = box[2] <= WORLD[2] / MAX_ZOOM + 0.5;
+    if (zoomOut) zoomOut.disabled = !zoomed;
+  }
+  function glide(target, onDone) {
+    const from = box.slice(), to = fit(target), id = ++gliding;
+    if (still || document.hidden) { draw(to); if (onDone) onDone(); return; }
     const start = performance.now(), length = 450;
     function step(now) {
+      if (id !== gliding) return;            // a newer move took over
       const t = Math.min(1, (now - start) / length), e = 1 - Math.pow(1 - t, 3);
-      map.setAttribute("viewBox", from.map((f, i) => (f + (to[i] - f) * e).toFixed(2)).join(" "));
-      if (t < 1) requestAnimationFrame(step);
+      draw(from.map((f, i) => f + (to[i] - f) * e));
+      if (t < 1) requestAnimationFrame(step); else if (onDone) onDone();
     }
     requestAnimationFrame(step);
+  }
+  function pressView(button) { views.forEach((x) => x.setAttribute("aria-pressed", String(x === button))); }
+  // Zoom by a factor around a point on the map (map units), keeping that point under the cursor.
+  function zoomAround(factor, px, py, animate) {
+    const w = box[2] / factor, h = w / RATIO;
+    const next = [px - (px - box[0]) / factor, py - (py - box[1]) / factor, w, h];
+    pressView(null);
+    if (animate) glide(next); else { gliding++; draw(next); }
+  }
+  function toMap(clientX, clientY) {
+    const r = map.getBoundingClientRect();
+    return [box[0] + (clientX - r.left) / r.width * box[2], box[1] + (clientY - r.top) / r.height * box[3]];
+  }
+  const centre = () => [box[0] + box[2] / 2, box[1] + box[3] / 2];
+
+  views.forEach((b) => b.addEventListener("click", () => {
+    pressView(b);
+    glide(b.dataset.view.split(" ").map(Number));
   }));
+  if (zoomIn) zoomIn.addEventListener("click", () => zoomAround(2, ...centre(), true));
+  if (zoomOut) zoomOut.addEventListener("click", () => zoomAround(0.5, ...centre(), true));
+
+  // Ctrl or Cmd + scroll, and trackpad pinches (which arrive as Ctrl + scroll), zoom the map.
+  // A plain scroll is left alone so the page keeps scrolling past the map.
+  map.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    zoomAround(Math.exp(-e.deltaY * 0.01), ...toMap(e.clientX, e.clientY), false);
+  }, { passive: false });
+
+  // Dragging (mouse or one finger) moves the map; two fingers pinch to zoom. A drag only starts
+  // once the pointer has moved a few pixels, so a plain click still picks a country.
+  const pointers = new Map();
+  let drag = null, pinch = null, dragged = false;
+  map.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    dragged = false;
+    if (pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      pinch = { dist: Math.hypot(a[0] - b[0], a[1] - b[1]) };
+      drag = null;
+    } else if (pointers.size === 1) {
+      drag = { x: e.clientX, y: e.clientY, box: box.slice(), id: e.pointerId };
+    }
+  });
+  map.addEventListener("pointermove", (e) => {
+    if (!pointers.has(e.pointerId)) return;
+    pointers.set(e.pointerId, [e.clientX, e.clientY]);
+    if (pinch && pointers.size === 2) {
+      const [a, b] = [...pointers.values()];
+      const dist = Math.hypot(a[0] - b[0], a[1] - b[1]);
+      if (pinch.dist > 0) zoomAround(dist / pinch.dist, ...toMap((a[0] + b[0]) / 2, (a[1] + b[1]) / 2), false);
+      pinch.dist = dist;
+      dragged = true;
+      return;
+    }
+    if (!drag || box[2] >= WORLD[2] - 0.5) return;   // nothing to move at the whole-world view
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!dragged && Math.hypot(dx, dy) < 5) return;
+    if (!dragged) { dragged = true; map.setPointerCapture(e.pointerId); map.classList.add("dragging"); pressView(null); }
+    const r = map.getBoundingClientRect();
+    gliding++;
+    draw([drag.box[0] - dx / r.width * box[2], drag.box[1] - dy / r.height * box[3], box[2], box[3]]);
+  });
+  function release(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) { drag = null; map.classList.remove("dragging"); }
+  }
+  map.addEventListener("pointerup", release);
+  map.addEventListener("pointercancel", release);
+  // The click that ends a drag isn't a country pick.
+  map.addEventListener("click", (e) => { if (dragged) { e.stopImmediatePropagation(); dragged = false; } }, true);
+
+  // Keyboard, once the map has focus: + and - zoom, arrows move, 0 shows the whole world.
+  map.addEventListener("keydown", (e) => {
+    const step = box[2] / 8;
+    const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    if (e.key === "+" || e.key === "=") zoomAround(2, ...centre(), true);
+    else if (e.key === "-" || e.key === "_") zoomAround(0.5, ...centre(), true);
+    else if (e.key === "0") { pressView(views[0]); glide(WORLD); }
+    else if (moves[e.key]) { pressView(null); glide([box[0] + moves[e.key][0], box[1] + moves[e.key][1], box[2], box[3]]); }
+    else return;
+    e.preventDefault();
+  });
+  draw(box);
 })();
 </script>
 {% endmacro %}
