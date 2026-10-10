@@ -1,97 +1,120 @@
+{% import "_ui.html" as ui with context %}
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}SentryFeed{% endblock %}</title>
+{{ ui.head(none, "light") }}
+<title>{% block title %}SentryFeed: security news, read and ranked{% endblock %}</title>
 <style nonce="{{ csp_nonce }}">
-  :root {
+  /* Warm paper and ink: SentryFeed is read, not monitored, and warm neutrals cut glare for
+     reading while keeping it apart from the cold blue-grey of most security dashboards. */
+  :root, :root[data-theme="dark"] {
     color-scheme: dark;
-    --bg: #0b0d10;
-    --panel: #12151a;
-    --panel-hover: #181c22;
-    --line: #232830;
-    --text: #e4e7eb;
-    --muted: #8a929c;
-    --red: #f0524f;
-    --orange: #f5903d;
-    --yellow: #e5c243;
-    --green: #4cc38a;
-    --blue: #6aa7f8;
-    --purple: #b98cf5;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --bg: #15130f; --raised: #1e1b16; --ink: #eee9df; --muted: #aba497; --rule: #3b362e; --strong-rule: #eee9df;
+    --red: #ff6b5e; --orange: #f39a4a; --yellow: #e2c24f; --green: #5cc58f; --blue: #82b2f5; --purple: #c7a0f8;
+    --land: #2a261f; --land-edge: #15130f; --hover: #26221c;
+  }
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --bg: #f7f3ea; --raised: #eee8da; --ink: #1b1915; --muted: #5b554a; --rule: #d3cab7; --strong-rule: #1b1915;
+    --red: #b3261e; --orange: #9e4a08; --yellow: #765c00; --green: #1d6a44; --blue: #1f58a5; --purple: #6a3fb0;
+    --land: #e0d8c6; --land-edge: #f7f3ea; --hover: #e6dfcf;
+  }
+  :root {
+    /* Serif for headlines: the newspaper voice, since this page reads the news for you.
+       System serifs only (no web fonts under the security policy): Iowan on Apple, Palatino on Windows. */
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* Mono only for CVE IDs and hashes, where every character matters. */
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* The names the older pages (Stocks, My stack, Events, File check) use, mapped onto this palette. */
+    --text: var(--ink); --line: var(--rule); --panel: var(--raised); --panel-hover: var(--hover);
   }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
-  html, body { margin: 0; height: 100%; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.5 var(--sans);
-    display: flex;
-    flex-direction: column;
-  }
-  a { color: inherit; }
-  button, input { font: inherit; color: inherit; }
-  :focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
-  .sr-only {
-    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
-    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
-  }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--sans); }
+  a { color: inherit; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+  button { font: inherit; color: inherit; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 32px; }
+  .sev-red { --sev: var(--red); } .sev-orange { --sev: var(--orange); } .sev-yellow { --sev: var(--yellow); }
+  .sev-green { --sev: var(--green); } .sev-blue { --sev: var(--blue); }
 
-  header {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 8px 20px;
-    padding: 14px 20px;
-    border-bottom: 1px solid var(--line);
-  }
-  .brand { font: 600 17px var(--mono); letter-spacing: 0.04em; text-decoration: none; }
-  .brand span { color: var(--red); }
-  .sections { display: flex; flex-wrap: wrap; gap: 4px 16px; }
-  .sections a {
-    font-size: 13.5px;
-    color: var(--muted);
-    text-decoration: none;
-    padding-bottom: 2px;
-    border-bottom: 2px solid transparent;
-  }
-  .sections a:hover { color: var(--text); }
-  .sections a[aria-current="page"] { color: var(--text); border-bottom-color: var(--red); }
+  /* Masthead */
+  .masthead { text-align: center; padding-top: 14px; }
+  .dateline { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--rule); padding-bottom: 10px; }
+  .dateline time { color: var(--ink); }
+  .theme-toggle { color: var(--ink); background: none; border: 1px solid var(--rule); border-radius: 3px; padding: 6px 12px; min-height: 36px; cursor: pointer; font-size: 13px; }
+  .theme-toggle:hover { border-color: var(--ink); }
+  .nameplate { display: inline-block; font: 700 clamp(40px, 7vw, 76px)/1 var(--serif); letter-spacing: -0.02em; text-decoration: none; margin: 22px 0 6px; }
+  .tagline { font: italic 17px/1.4 var(--serif); color: var(--muted); margin: 0 0 16px; }
 
-  .sev-red    { --sev: var(--red); }
-  .sev-orange { --sev: var(--orange); }
-  .sev-yellow { --sev: var(--yellow); }
-  .sev-green  { --sev: var(--green); }
-  .sev-blue   { --sev: var(--blue); }
+  /* Section menus: a row of words under the nameplate, like a newspaper's section bar */
+  .menus { border-top: 3px double var(--strong-rule); border-bottom: 1px solid var(--rule); position: relative; }
+  .menus-row { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; gap: 4px 28px; }
+  .menus-row > li { position: relative; }
+  .menu-home, .menu-button { display: inline-block; background: none; border: 0; padding: 10px 2px; min-height: 44px; font: 600 15px var(--sans); cursor: pointer; text-decoration: none; }
+  .menu-button::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-3px) rotate(45deg); }
+  .menu-button[aria-expanded="true"]::after { transform: translateY(1px) rotate(-135deg); }
+  .menu-panel { position: absolute; z-index: 5; top: 100%; left: 50%; transform: translateX(-50%); min-width: 240px; list-style: none; margin: 0; padding: 8px 0; background: var(--bg); border: 1px solid var(--ink); text-align: left; }
+  .menu-panel a, .menu-panel .planned, .menu-all a, .menu-all .planned { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; text-decoration: none; }
+  .menu-panel a:hover, .menu-all a:hover { background: var(--raised); }
+  .planned { color: var(--muted); }
+  .planned-tag { font: italic 13px var(--serif); }
+  .menu-mobile { display: none; }
+  .menu-all { text-align: left; padding: 8px 0 16px; }
+  .menu-all-group { font: 600 13px var(--sans); color: var(--muted); margin: 16px 16px 4px; }
+  .menu-all ul { list-style: none; margin: 0; padding: 0; }
 
-  @media (max-width: 860px) {
-    header { padding: 12px 16px; }
-    body { height: auto; }
+  .menu-panel a[aria-current="page"], .menu-all a[aria-current="page"], .menu-home[aria-current="page"] { text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 2px; }
+  .menu-button.here { text-decoration: underline; text-underline-offset: 6px; text-decoration-thickness: 2px; }
+
+  /* Older pages keep their layouts for now, but line up with the masthead and take the serif for headings. */
+  main.page { padding-left: 32px; padding-right: 32px; }
+  main.page .page-inner { max-width: 1116px; }
+  .page h1, .page h2 { font-family: var(--serif); font-weight: 700; }
+  .page h1 { font-size: clamp(28px, 3.6vw, 38px); line-height: 1.15; letter-spacing: -0.01em; }
+
+  .site-footer { border-top: 3px double var(--strong-rule); margin-top: 64px; padding: 20px 0 40px; }
+  .site-footer ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 28px; font-size: 14px; }
+  .site-footer a { display: inline-block; padding: 10px 0; }
+
+  /* Slim masthead: on the map page, and on every page on phones, so the news starts on the first screen. */
+  .masthead.slim .nameplate { font-size: 34px; margin: 12px 0 2px; }
+  .masthead.slim .tagline { font-size: 14px; margin-bottom: 10px; }
+
+  @media (max-width: 760px) {
+    .wrap { padding: 0 16px; }
+    main.page { padding-left: 16px; padding-right: 16px; }
+    .menus-row { display: none; }
+    .menu-mobile { display: block; width: 100%; background: none; border: 0; min-height: 44px; font: 600 15px var(--sans); cursor: pointer; }
+    .dateline { padding-bottom: 6px; }
+    .theme-toggle { min-height: 44px; }
+    .dateline .dateline-updated { display: none; } /* the home page repeats it under the top line */
+    .nameplate, .masthead.slim .nameplate { font-size: 32px; margin: 10px 0 0; }
+    .tagline, .masthead.slim .tagline { font-size: 13px; margin: 0 0 8px; }
   }
 </style>
 {% block styles %}{% endblock %}
 </head>
 <body>
-
-<header>
-  <a class="brand" href="/">SENTRY<span>/</span>FEED</a>
-  <nav class="sections" aria-label="Sections">
-    <a href="/"{% if active == "feed" %} aria-current="page"{% endif %}>Feed</a>
-    <a href="/map"{% if active == "map" %} aria-current="page"{% endif %}>Map</a>
-    <a href="/stocks"{% if active == "stocks" %} aria-current="page"{% endif %}>Stocks</a>
-    <a href="/stack"{% if active == "stack" %} aria-current="page"{% endif %}>My stack</a>
-    <a href="/events"{% if active == "events" %} aria-current="page"{% endif %}>Events</a>
-    <a href="/password"{% if active == "password" %} aria-current="page"{% endif %}>Password check</a>
-    <a href="/scan"{% if active == "scan" %} aria-current="page"{% endif %}>File &amp; link check</a>
-  </nav>
-  {% block header_extra %}{% endblock %}
+<div class="wrap">
+<header class="masthead {% block masthead_class %}slim{% endblock %}">
+  <div class="dateline">
+    <span>{{ site_today.strftime("%A %-d %B %Y") }}</span>
+    <span class="dateline-updated">{% if site_collected %}Updated {{ site_collected.strftime("%H:%M") }} Dubai time ({{ site_updated }}){% else %}No stories collected yet{% endif %}</span>
+    {{ ui.theme_button() }}
+  </div>
+  <a class="nameplate" href="/">SentryFeed</a>
+  <p class="tagline">Security news, read and ranked every 30 minutes. Made in Dubai.</p>
+  {{ ui.menus(site_nav, active) }}
 </header>
-
+</div>
 {% block body %}{% endblock %}
-
+<div class="wrap">{{ ui.footer(site_footer) }}</div>
+{{ ui.chrome_script() }}
 {% block scripts %}{% endblock %}
 </body>
 </html>

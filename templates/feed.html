@@ -1,0 +1,314 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}The feed · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .feed-head { display: grid; grid-template-columns: 1fr auto; gap: 12px 32px; align-items: end; margin: 28px 0 18px; }
+  .feed-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 6px; }
+  .standfirst { font: 18px/1.5 var(--serif); margin: 0; max-width: 62ch; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; }
+  .windows { display: flex; border: 1px solid var(--ink); }
+  .windows a { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; text-decoration: none; font-weight: 600; font-size: 14px; }
+  .windows a + a { border-left: 1px solid var(--ink); }
+  .windows a[aria-current="page"] { background: var(--ink); color: var(--bg); }
+  .stack-toggle, .stack-setup { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border: 1px solid var(--rule); background: none; font: 600 14px var(--sans); cursor: pointer; text-decoration: none; }
+  .stack-toggle[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+
+  /* Severity filters, read like a paper's index: a big number in its colour, then the label */
+  .tiles { display: flex; flex-wrap: wrap; border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); }
+  .tile { flex: 1 1 120px; display: flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 12px 14px; cursor: pointer; text-align: left; }
+  .tile + .tile { border-left: 1px solid var(--rule); }
+  .tile:hover { background: var(--raised); }
+  .tile .n { font: 700 30px/1 var(--serif); color: var(--sev); font-variant-numeric: tabular-nums; }
+  .tile .label { font-size: 14px; }
+  .tile[aria-pressed="true"] { background: var(--raised); box-shadow: inset 0 -3px 0 var(--sev); }
+  .tiles.filtering .tile:not([aria-pressed="true"]) .n { opacity: 0.45; }
+
+  .columns { display: grid; grid-template-columns: minmax(300px, 5fr) 7fr; gap: 0 40px; margin-top: 4px; }
+  .feed { list-style: none; margin: 0; padding: 0; }
+  .feed li { border-bottom: 1px solid var(--rule); }
+  .item { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 12px 8px 13px; cursor: pointer; }
+  .item:hover { background: var(--raised); }
+  .item[aria-current="true"] { background: var(--raised); box-shadow: inset 3px 0 0 var(--sev); } /* marks the story open in the reading panel */
+  .kick { display: block; font-size: 13px; color: var(--muted); margin-bottom: 3px; }
+  .kick strong { color: var(--sev); font: 700 14px var(--serif); }
+  .item .title { display: block; font: 600 17px/1.3 var(--serif); }
+  .meta { display: flex; flex-wrap: wrap; gap: 2px 12px; margin-top: 4px; font-size: 13px; color: var(--muted); }
+  .kev-tag { color: var(--red); font-weight: 600; }
+  .stack-empty { padding: 24px 8px; font: italic 17px var(--serif); color: var(--muted); }
+  .stack-empty a { color: var(--ink); }
+
+  /* Reading panel: stays in view while the list scrolls */
+  .detail { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; padding: 18px 4px 24px; }
+  .detail .kicker { margin: 0 0 8px; font-size: 14px; color: var(--muted); }
+  .detail .kicker strong { color: var(--sev); font: 700 16px var(--serif); }
+  .detail h2 { font: 700 clamp(26px, 3vw, 36px)/1.15 var(--serif); letter-spacing: -0.01em; margin: 0 0 12px; }
+  .detail .meta { font-size: 14px; margin: 0 0 14px; }
+  .geo, .stock { font-size: 14px; color: var(--muted); margin: 0 0 12px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .geo .blamed { color: var(--purple); }
+  .stock strong { color: var(--ink); }
+  .cves { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0 0 16px; font: 13px var(--mono); }
+  .detail .summary { font: 19px/1.6 var(--serif); margin: 0 0 20px; white-space: pre-line; max-width: 64ch; }
+  .read { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border: 2px solid var(--ink); background: var(--ink); color: var(--bg); text-decoration: none; font-weight: 700; }
+  .read:hover { background: transparent; color: var(--ink); }
+  .also { margin: 28px 0 0; padding-top: 12px; border-top: 2px solid var(--strong-rule); }
+  .also h3 { font: 700 18px var(--serif); margin: 0 0 10px; }
+  .also ul { list-style: none; margin: 0; padding: 0; }
+  .also li { padding: 8px 0; border-bottom: 1px solid var(--rule); }
+  .also a { text-decoration: none; display: block; }
+  .also a:hover .also-title { text-decoration: underline; }
+  .also-source { display: block; font-size: 13px; color: var(--muted); }
+  .also-title { font: 16px var(--serif); }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); margin: 24px 0; }
+  .empty code { font: 15px var(--mono); color: var(--ink); }
+
+  @media (max-width: 900px) {
+    .feed-head { grid-template-columns: 1fr; }
+    .controls { justify-content: flex-start; }
+    .columns { display: flex; flex-direction: column-reverse; }
+    .detail { position: static; max-height: none; overflow: visible; border-bottom: 2px solid var(--strong-rule); margin-bottom: 8px; }
+  }
+  @media (max-width: 560px) {
+    .tile { flex-basis: 30%; padding: 10px 8px; gap: 6px; }
+    .tile .n { font-size: 24px; }
+    .tile + .tile { border-left: 0; }
+    .windows a { padding: 0 10px; }
+    .detail .summary { font-size: 17px; }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="feed-head">
+    <div>
+      <h1>The feed</h1>
+      <p class="standfirst">Every story from the last {{ "24 hours" if days == 1 else dict(windows)[days] }}, most serious first: {{ ui.plural(items|length, "story", "stories") }}{% if kev_count %}, {{ kev_count }} on CISA's exploited list{% endif %}.</p>
+    </div>
+    <div class="controls">
+      <button class="stack-toggle" id="stack-toggle" type="button" aria-pressed="false" hidden>My stack</button>
+      <a class="stack-setup" id="stack-setup" href="/stack" hidden>Set up My stack</a>
+      <nav class="windows" aria-label="Time window">
+        {% for d, label in windows %}<a href="?days={{ d }}"{% if d == days %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+      </nav>
+    </div>
+  </div>
+
+  <div class="tiles" id="tiles" role="group" aria-label="Filter by severity">
+    {% for key, label in tiles %}
+    <button class="tile sev-{{ key }}" data-sev="{{ key }}" aria-pressed="false"><span class="n">{{ counts.get(key, 0) }}</span><span class="label">{{ label }}</span></button>
+    {% endfor %}
+  </div>
+
+  {% if items %}
+  <div class="columns">
+    <ul class="feed" id="feed" aria-label="Stories">
+      {% for item in items %}
+      <li data-sev="{{ item.severity }}" data-products="{{ item.products | join(' ') }}">
+        <button class="item sev-{{ item.severity }}" data-index="{{ loop.index0 }}"{% if loop.first %} aria-current="true"{% endif %}>
+          <span class="kick"><strong>{{ dict(severities)[item.severity] }}.</strong> {{ item.reason }}</span>
+          <span class="title">{{ item.headline }}</span>
+          <span class="meta">
+            <span>{{ item.source }}</span>
+            {% if item.age %}<span>{{ item.age }}</span>{% endif %}
+            {% if item.kev %}<span class="kev-tag">On CISA's exploited list</span>{% endif %}
+            {% if item.also %}<span>{{ ui.plural(item.also|length, "more outlet", "more outlets") }}</span>{% endif %}
+          </span>
+        </button>
+      </li>
+      {% endfor %}
+      <li class="stack-empty" id="stack-empty" hidden>Nothing about your stack in this time window. Try a longer window, or <a href="/stack">change My stack</a>.</li>
+    </ul>
+    <section class="detail" id="detail" aria-live="polite" aria-label="Selected story">
+      <p class="kicker"><strong id="d-sev"></strong> <span id="d-reason"></span></p>
+      <h2 id="d-title"></h2>
+      <p class="meta" id="d-meta"></p>
+      <p class="geo" id="d-geo" hidden></p>
+      <p class="stock" id="d-stock" hidden></p>
+      <p class="cves" id="d-cves"></p>
+      <p class="summary" id="d-summary"></p>
+      <a class="read" id="d-link" target="_blank" rel="noopener noreferrer">Read the article</a>
+      <div class="also" id="d-also" hidden>
+        <h3>Also reported by</h3>
+        <ul id="d-also-list"></ul>
+      </div>
+    </section>
+  </div>
+  {% else %}
+  <p class="empty">Nothing in this time window yet. Run <code>python collect.py</code> on the Pi, then refresh.</p>
+  {% endif %}
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+  const ITEMS = {{ items | tojson }};
+  const LABELS = {{ dict(severities) | tojson }};
+  const COUNTRIES = {{ country_names | tojson }};
+
+  // Everything from the feeds goes in via textContent, never innerHTML,
+  // so article text can't inject markup into the page.
+  const $ = (id) => document.getElementById(id);
+  const span = (text, cls) => {
+    const el = document.createElement("span");
+    if (cls) el.className = cls;
+    el.textContent = text;
+    return el;
+  };
+
+  function show(index) {
+    const item = ITEMS[index];
+    if (!item) return;
+    $("detail").className = "detail sev-" + item.severity;
+    $("d-sev").textContent = LABELS[item.severity] + ".";
+    $("d-reason").textContent = item.reason || "";
+    $("d-title").textContent = item.headline;
+
+    const meta = $("d-meta");
+    meta.replaceChildren();
+    for (const part of [item.source, item.age]) if (part) meta.append(span(part));
+
+    const geo = $("d-geo");
+    geo.replaceChildren();
+    const where = item.where || [], blamed = item.blamed || [];
+    if (where.length) geo.append(span("In " + where.map((c) => COUNTRIES[c] || c).join(", ")));
+    if (blamed.length) geo.append(span("Blamed: " + blamed.map((c) => COUNTRIES[c] || c).join(", "), "blamed"));
+    if (where.length || blamed.length) {
+      const a = document.createElement("a");
+      a.href = "/map";
+      a.textContent = "See it on the map";
+      geo.append(a);
+    }
+    geo.hidden = !(where.length || blamed.length);
+
+    const stock = $("d-stock");
+    stock.replaceChildren();
+    if (item.stock) {
+      const s = item.stock;
+      const pct = (v) => (v >= 0 ? "+" : "") + (v * 100).toFixed(1) + "%";
+      const line = document.createElement("span");
+      line.append(s.company + " (" + (s.us ? "" : s.exchange + ": ") + s.display_ticker + ") ");
+      if (s.no_prices) {
+        line.append("is listed, but there's no free price data for " + s.exchange);
+      } else if (s.change !== null) {
+        const strong = document.createElement("strong");
+        strong.textContent = pct(s.change);
+        line.append(strong, " since the story, against " + s.market_name + " " + pct(s.market_change));
+      } else {
+        line.append("is listed; price data is on its way");
+      }
+      if (s.sec) line.append(", with an SEC breach filing");
+      stock.append(line);
+      const a = document.createElement("a");
+      a.href = "/stocks";
+      a.textContent = "Stock impact";
+      stock.append(a);
+    }
+    stock.hidden = !item.stock;
+
+    const cves = $("d-cves");
+    cves.replaceChildren();
+    for (const id of item.cves) {
+      const a = document.createElement("a");
+      a.href = "https://nvd.nist.gov/vuln/detail/" + encodeURIComponent(id);
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = id;
+      cves.append(a);
+    }
+
+    $("d-summary").textContent = item.summary || (item.event ? "No description given." : "No summary in the feed.");
+
+    const link = $("d-link");
+    link.textContent = item.event ? "Open the event page" : "Read the article";
+    if (item.link) { link.href = item.link; link.hidden = false; }
+    else { link.hidden = true; }
+
+    const also = $("d-also-list");
+    also.replaceChildren();
+    for (const other of item.also || []) {
+      const li = document.createElement("li");
+      let box = li;
+      if (other.link) {
+        box = document.createElement("a");
+        box.href = other.link;
+        box.target = "_blank";
+        box.rel = "noopener noreferrer";
+        li.append(box);
+      }
+      box.append(span(other.source + (other.age ? " · " + other.age : ""), "also-source"), span(other.title, "also-title"));
+      also.append(li);
+    }
+    $("d-also").hidden = !(item.also && item.also.length);
+
+    document.querySelectorAll(".item[aria-current]").forEach((el) => el.removeAttribute("aria-current"));
+    document.querySelector(`.item[data-index="${index}"]`).setAttribute("aria-current", "true");
+  }
+
+  const feed = $("feed");
+  if (feed) {
+    feed.addEventListener("click", (e) => {
+      const btn = e.target.closest(".item");
+      if (!btn) return;
+      show(Number(btn.dataset.index));
+      if (window.matchMedia("(max-width: 900px)").matches) {
+        $("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+    show(0);
+  }
+
+  // Two filters that combine: a severity tile, and My stack (the products picked on
+  // /stack, which are kept only in this browser).
+  let sevFilter = null, stackOn = false;
+  const stack = (() => {
+    try { return new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]")); }
+    catch (e) { return new Set(); }
+  })();
+  const inStack = (li) => (li.dataset.products || "").split(" ").some((p) => p && stack.has(p));
+
+  function applyFilters() {
+    let first = null;
+    document.querySelectorAll("#feed li[data-sev]").forEach((li) => {
+      const visible = (!sevFilter || li.dataset.sev === sevFilter) && (!stackOn || inStack(li));
+      li.hidden = !visible;
+      if (visible && first === null) first = li.querySelector(".item").dataset.index;
+    });
+    const empty = $("stack-empty");
+    if (empty) empty.hidden = !(stackOn && first === null);
+    if (first !== null) show(Number(first));
+  }
+
+  const tiles = $("tiles");
+  tiles.addEventListener("click", (e) => {
+    const tile = e.target.closest(".tile");
+    if (!tile) return;
+    const turningOn = tile.getAttribute("aria-pressed") !== "true";
+    tiles.querySelectorAll(".tile").forEach((t) => t.setAttribute("aria-pressed", "false"));
+    tile.setAttribute("aria-pressed", String(turningOn));
+    tiles.classList.toggle("filtering", turningOn);
+    sevFilter = turningOn ? tile.dataset.sev : null;
+    applyFilters();
+  });
+
+  const toggle = $("stack-toggle");
+  if (stack.size) {
+    const matching = [...document.querySelectorAll("#feed li[data-sev]")].filter(inStack).length;
+    toggle.textContent = "My stack: " + matching;
+    toggle.hidden = false;
+    try { stackOn = localStorage.getItem("sentryfeed.stackOn") === "1"; } catch (e) { /* stays off */ }
+    toggle.setAttribute("aria-pressed", String(stackOn));
+    toggle.addEventListener("click", () => {
+      stackOn = !stackOn;
+      toggle.setAttribute("aria-pressed", String(stackOn));
+      try { localStorage.setItem("sentryfeed.stackOn", stackOn ? "1" : "0"); } catch (e) { /* fine */ }
+      applyFilters();
+    });
+    if (stackOn) applyFilters();
+  } else {
+    $("stack-setup").hidden = false;
+  }
+</script>
+{% endblock %}

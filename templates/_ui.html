@@ -1,0 +1,266 @@
+{# Shared building blocks for every page. Import with context so csp_nonce is visible. #}
+
+{% macro head(title, fallback="dark") %}
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+{% if title %}<title>{{ title }}</title>{% endif %}
+{# Runs before the page paints, so a saved theme never flashes the other one first.
+   No saved choice: follow the device's setting, and use the fallback when it states none. #}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("sentryfeed.theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark" && window.matchMedia) {
+    if (matchMedia("(prefers-color-scheme: dark)").matches) t = "dark";
+    else if (matchMedia("(prefers-color-scheme: light)").matches) t = "light";
+  }
+  if (t !== "light" && t !== "dark") t = "{{ fallback }}";
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+{% endmacro %}
+
+{% macro theme_button(cls="") %}
+<button type="button" class="theme-toggle {{ cls }}" id="theme-toggle">Theme</button>
+{% endmacro %}
+
+{# Desktop: one dropdown per group. Phones: a single "Menu" button opening every group as a list.
+   Planned pages are named but not linked, so nothing in the menu leads nowhere.
+   nav is [(group, [(label, href or None, page key)])]; active is the current page's key. #}
+{% macro menu_links(links, active) %}
+  {% for label, href, key in links %}
+  {% if href %}<li><a href="{{ href }}"{% if key == active %} aria-current="page"{% endif %}>{{ label }}</a></li>
+  {% else %}<li class="planned"><span>{{ label }}</span> <span class="planned-tag">planned</span></li>{% endif %}
+  {% endfor %}
+{% endmacro %}
+
+{% macro menus(nav, active) %}
+<nav class="menus" aria-label="Sections">
+  <ul class="menus-row">
+    <li><a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a></li>
+    {% for group, links in nav %}
+    {% set here = active in links | map(attribute=2) | list %}
+    <li class="menu">
+      <button type="button" class="menu-button{{ ' here' if here }}" aria-expanded="false" aria-controls="menu-{{ loop.index }}">{{ group }}</button>
+      <ul class="menu-panel" id="menu-{{ loop.index }}" hidden>{{ menu_links(links, active) }}</ul>
+    </li>
+    {% endfor %}
+  </ul>
+  <button type="button" class="menu-mobile" aria-expanded="false" aria-controls="menu-all">Menu</button>
+  <div class="menu-all" id="menu-all" hidden>
+    <a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a>
+    {% for group, links in nav %}
+    <h2 class="menu-all-group">{{ group }}</h2>
+    <ul>{{ menu_links(links, active) }}</ul>
+    {% endfor %}
+  </div>
+</nav>
+{% endmacro %}
+
+{% macro footer(links) %}
+<footer class="site-footer">
+  <ul>
+    {% for label, href in links %}<li><a href="{{ href }}" rel="noopener noreferrer">{{ label }}</a></li>{% endfor %}
+  </ul>
+</footer>
+{% endmacro %}
+
+{# Menus and the theme switch. Escape closes an open menu and returns focus to its button. #}
+{% macro chrome_script() %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const root = document.documentElement;
+  const theme = document.getElementById("theme-toggle");
+  function showTheme() {
+    const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+    theme.textContent = next === "light" ? "Light" : "Dark";
+    theme.setAttribute("aria-label", "Switch to " + next + " theme");
+  }
+  if (theme) {
+    showTheme();
+    theme.addEventListener("click", () => {
+      const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("sentryfeed.theme", next); } catch (e) { /* still switches for this page */ }
+      showTheme();
+      document.dispatchEvent(new CustomEvent("themechange"));
+    });
+  }
+
+  const buttons = Array.from(document.querySelectorAll(".menu-button, .menu-mobile"));
+  function close(button, refocus) {
+    button.setAttribute("aria-expanded", "false");
+    document.getElementById(button.getAttribute("aria-controls")).hidden = true;
+    if (refocus) button.focus();
+  }
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const open = button.getAttribute("aria-expanded") === "true";
+      buttons.forEach((b) => close(b, false));
+      if (!open) {
+        button.setAttribute("aria-expanded", "true");
+        document.getElementById(button.getAttribute("aria-controls")).hidden = false;
+      }
+    });
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const open = buttons.find((b) => b.getAttribute("aria-expanded") === "true");
+    if (open) close(open, true);
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".menus")) buttons.forEach((b) => close(b, false));
+  });
+})();
+</script>
+{% endmacro %}
+
+{# "Your stack": the saved products never leave the browser. The page already holds every
+   story from the last 14 days that names a catalogue product, and this picks the matches. #}
+{% macro stack_script(data, limit=3) %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const out = document.getElementById("stack-out");
+  if (!out) return;
+  const STORIES = {{ data.stack_stories | tojson }};
+  const NAMES = {{ data.stack_names | tojson }};
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES); }
+  catch (e) { saved = []; }
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  out.replaceChildren();
+  if (!saved.length) {
+    const p = el("p", "stack-invite");
+    const a = el("a", null, "Pick the products your company runs");
+    a.href = "/stack";
+    p.append(a, " to see stories about them here. Your list stays in this browser.");
+    out.append(p);
+    return;
+  }
+  const mine = new Set(saved);
+  const hits = STORIES.filter((s) => s.products.some((p) => mine.has(p)));
+  const head = el("p", "stack-head");
+  const count = el("strong", "stack-count", String(hits.length));
+  head.append(count, hits.length === 1 ? " story in the last 14 days about products you run" :
+                                          " stories in the last 14 days about products you run");
+  out.append(head);
+  if (!hits.length) {
+    head.append(" (" + saved.length + " saved). Nothing to act on.");
+    return;
+  }
+  const list = el("ul", "stack-list");
+  hits.slice(0, {{ limit }}).forEach((s) => {
+    const li = el("li", "stack-item sev-" + s.severity);
+    const products = s.products.filter((p) => mine.has(p)).map((p) => NAMES[p]).join(", ");
+    li.append(el("span", "stack-products", products));
+    if (s.link) {
+      const a = el("a", null, s.title);
+      a.href = s.link;
+      a.rel = "noopener noreferrer";
+      li.append(a);
+    } else {
+      li.append(el("span", null, s.title));
+    }
+    li.append(el("span", "stack-age", s.age));
+    list.append(li);
+  });
+  out.append(list);
+  if (hits.length > {{ limit }}) {
+    const more = el("a", "stack-more", "All " + hits.length + " in My stack");
+    more.href = "/stack";
+    out.append(more);
+  }
+})();
+</script>
+{% endmacro %}
+
+
+{# Map fills for countries with stories, drawn server-side: one nonce'd rule per country. #}
+{% macro map_fills(scope, map) %}
+<style nonce="{{ csp_nonce }}">
+{% for c in map.countries %}{{ scope }} [data-cc="{{ c.cc }}"] { fill: var(--{{ c.worst }}); }
+{{ scope }} .dot[data-cc="{{ c.cc }}"] { display: inline; }
+{% endfor %}{% for b in map.blamed %}{{ scope }} [data-cc="{{ b.cc }}"] { stroke: var(--purple); stroke-width: 1.5px; }
+{{ scope }} .dot[data-cc="{{ b.cc }}"] { display: inline; }
+{% endfor %}
+</style>
+{% endmacro %}
+
+{% macro plural(n, one, many) %}{{ n }} {{ one if n == 1 else many }}{% endmacro %}
+
+{% macro sev_word(sev) %}{{ {"red": "Major", "orange": "Medium", "yellow": "Low", "green": "Tech & AI", "blue": "Event"}[sev] }}{% endmacro %}
+
+{# The interactive map: pick a country (from the list, or by clicking it on the map) to filter the
+   stories; the World/Gulf buttons glide the viewBox between views. Expects #<map_id> with .country
+   shapes and .link lines, .clist buttons with .cname, #stories li with data-where/data-blamed,
+   #stories-title, #clear and .views buttons. #}
+{% macro atlas_script(map_id, resting_title) %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const map = document.getElementById("{{ map_id }}");
+  if (!map) return;
+  const buttons = Array.from(document.querySelectorAll(".clist button"));
+  const stories = Array.from(document.querySelectorAll("#stories li"));
+  const lines = Array.from(map.querySelectorAll(".link"));
+  const title = document.getElementById("stories-title");
+  const clear = document.getElementById("clear");
+  const known = new Set(buttons.map((b) => b.dataset.cc));
+  let selected = null;
+
+  function select(cc) {
+    selected = cc === selected ? null : cc;
+    map.querySelectorAll(".country.selected").forEach((el) => el.classList.remove("selected"));
+    buttons.forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cc === selected)));
+    let shown = 0;
+    stories.forEach((li) => {
+      const match = !selected || li.dataset.where.split(" ").includes(selected) || li.dataset.blamed.split(" ").includes(selected);
+      li.hidden = !match;
+      if (match) shown += 1;
+    });
+    lines.forEach((l) => l.classList.toggle("dim", !!selected && l.dataset.from !== selected && l.dataset.to !== selected));
+    if (selected) {
+      map.querySelectorAll('[data-cc="' + selected + '"]').forEach((el) => el.classList.add("selected"));
+      const name = buttons.find((b) => b.dataset.cc === selected).querySelector(".cname").textContent;
+      title.textContent = name + " (" + shown + ")";
+    } else {
+      title.textContent = "{{ resting_title }}";
+    }
+    clear.hidden = !selected;
+  }
+  buttons.forEach((b) => b.addEventListener("click", () => select(b.dataset.cc)));
+  clear.addEventListener("click", () => {
+    const was = selected;
+    select(selected);
+    const b = buttons.find((x) => x.dataset.cc === was);
+    if (b) b.focus();
+  });
+  map.addEventListener("click", (e) => {
+    const cc = e.target.getAttribute && e.target.getAttribute("data-cc");
+    if (cc && known.has(cc)) select(cc);
+  });
+
+  // World and Gulf views: the viewBox glides between them so you keep your bearings.
+  const views = Array.from(document.querySelectorAll(".views button"));
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const parse = (v) => v.split(" ").map(Number);
+  views.forEach((b) => b.addEventListener("click", () => {
+    views.forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    const from = parse(map.getAttribute("viewBox")), to = parse(b.dataset.view);
+    if (still || document.hidden) { map.setAttribute("viewBox", b.dataset.view); return; }
+    const start = performance.now(), length = 450;
+    function step(now) {
+      const t = Math.min(1, (now - start) / length), e = 1 - Math.pow(1 - t, 3);
+      map.setAttribute("viewBox", from.map((f, i) => (f + (to[i] - f) * e).toFixed(2)).join(" "));
+      if (t < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }));
+})();
+</script>
+{% endmacro %}
