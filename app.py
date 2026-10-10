@@ -20,6 +20,7 @@ from dedupe import group_stories
 from geo import locate
 import briefing
 import events
+import rss
 import stack
 import stocks
 import vulns
@@ -255,8 +256,8 @@ NO_COMPRESS = {"/events/submit"}
 
 
 def compress(resp):
-    """Gzip HTML pages. The map's shapes shrink to about a third, which matters on the Pi."""
-    if (resp.mimetype == "text/html" and resp.status_code in (200, 400, 503) and not resp.direct_passthrough
+    """Gzip HTML pages and feeds. The map's shapes shrink to about a third, which matters on the Pi."""
+    if (resp.mimetype in ("text/html", "application/rss+xml") and resp.status_code in (200, 400, 503) and not resp.direct_passthrough
             and request.path not in NO_COMPRESS and "Content-Encoding" not in resp.headers
             and "gzip" in request.headers.get("Accept-Encoding", "")):
         body = resp.get_data()
@@ -574,6 +575,68 @@ def digest_week(week):
         next_week=briefing.week_id(end) if end <= current else None, weeks=weeks,
         world_lite=briefing.WORLD_LITE, has_sec_contact=bool(stocks.sec_contact()),
     )
+
+
+SEVERITY_LABEL = dict(SEVERITIES)
+MAX_STACK_PRODUCTS = 60
+
+
+def stack_from_link():
+    """Valid product ids from ?stack=a,b,c (unknown ones ignored), in catalogue order."""
+    asked = set((request.args.get("stack") or "").lower().split(","))
+    return [pid for pid in stack.NAMES if pid in asked][:MAX_STACK_PRODUCTS]
+
+
+@app.route("/feeds")
+def feeds_page():
+    feeds = [(name, title, desc, url_for("feed_xml", name=name, _external=True))
+             for name, (title, desc) in rss.FEEDS.items()]
+    return render_template("feeds.html", active="feeds", feeds=feeds, stack_names=stack.NAMES,
+                           stack_base=url_for("feed_xml", name="stack", _external=True), days=rss.FEED_DAYS)
+
+
+@app.route("/feeds/<name>.xml")
+def feed_xml(name):
+    if name != "stack" and name not in rss.FEEDS:
+        abort(404)
+    page_url = url_for("feeds_page", _external=True)
+    feed_url = request.url
+    if name == "events":
+        conn = connect()
+        try:
+            listed = events.upcoming(conn)
+        finally:
+            conn.close()
+        for e in listed:
+            e["url"] = safe_link(e["url"])
+        title, desc = rss.FEEDS[name]
+        body = rss.build(title, desc, page_url, feed_url, [rss.event_item(e) for e in listed])
+    else:
+        stories = load_items(rss.FEED_DAYS)
+        if name == "stack":
+            products = stack_from_link()
+            if not products:
+                return Response("This feed needs ?stack= with product ids from SentryFeed's My stack page, "
+                                "e.g. /feeds/stack.xml?stack=fortinet,exchange\n", status=400,
+                                mimetype="text/plain")
+            mine = set(products)
+            chosen = [s for s in stories if s["severity"] in briefing.SECURITY and mine & set(s["products"])]
+            names = [stack.NAMES[p] for p in products]
+            title = "Your stack: " + (", ".join(names) if len(names) <= 4 else ", ".join(names[:4]) + f" and {len(names) - 4} more")
+            desc = "Stories about the products in this link, from SentryFeed's My stack."
+        else:
+            title, desc = rss.FEEDS[name]
+            if name == "major":
+                chosen = [s for s in stories if s["severity"] == "red"]
+            elif name == "major-medium":
+                chosen = [s for s in stories if s["severity"] in ("red", "orange")]
+            else:
+                chosen = briefing.gulf_stories(stories)[0]
+        body = rss.build(title, desc, page_url, feed_url,
+                         [rss.story_item(s, SEVERITY_LABEL[s["severity"]]) for s in chosen])
+    resp = Response(body, mimetype="application/rss+xml")
+    resp.headers["Cache-Control"] = "public, max-age=900"    # readers needn't ask more than every 15 minutes
+    return resp
 
 
 def visitor_address():

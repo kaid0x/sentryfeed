@@ -181,7 +181,7 @@ def upcoming(conn, within=None, now=None):
         if end < now or (within and start > now + within):
             continue
         event = {k: row[k] for k in ("id", "title", "kind", "starts_at", "ends_at", "tz", "online",
-                                     "location", "url", "organiser", "description")}
+                                     "location", "url", "organiser", "description", "reviewed_at")}
         event["kind_label"] = KIND_LABELS.get(row["kind"], "Other")
         event["when"] = _until(start, end, now)
         local = start.astimezone(ZoneInfo(DEFAULT_TZ))

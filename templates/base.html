@@ -4,6 +4,8 @@
 <head>
 {{ ui.head(none, "light") }}
 <title>{% block title %}SentryFeed: security news, read and ranked{% endblock %}</title>
+<link rel="alternate" type="application/rss+xml" title="SentryFeed: Major stories" href="/feeds/major.xml">
+<link rel="alternate" type="application/rss+xml" title="SentryFeed: Major and Medium stories" href="/feeds/major-medium.xml">
 <style nonce="{{ csp_nonce }}">
   /* Warm paper and ink: SentryFeed is read, not monitored, and warm neutrals cut glare for
      reading while keeping it apart from the cold blue-grey of most security dashboards. */

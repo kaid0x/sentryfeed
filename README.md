@@ -59,6 +59,22 @@ collect.py ──> stocks.py   breached US-listed companies: SEC filings and sha
 
 Comparisons only appear between two complete weeks: not for the week in progress, and not against SentryFeed's first week, which started part-way through. The page says when that's why they're missing. Past weeks are read from the stories already stored (nothing is deleted), so the archive goes back to the first collector run.
 
+## RSS feeds
+
+`/feeds` lists feeds for following SentryFeed from a feed reader, Outlook or Slack's RSS app (`/feed subscribe <link>`), each covering the last 7 days and updated with every collector run:
+
+| Feed | What's in it |
+|---|---|
+| `/feeds/major.xml` | Major stories |
+| `/feeds/major-medium.xml` | Major and Medium stories |
+| `/feeds/gulf.xml` | The Gulf, as on the front page: regional outlets and stories naming a GCC country, without vendor announcements |
+| `/feeds/events.xml` | Approved upcoming events |
+| `/feeds/stack.xml?stack=fortinet,exchange` | Stories about the products in the link, as on My stack |
+
+Each item has the readable headline, the plain-word reason, the summary, the other outlets and the CVEs, and links to the article. An item's ID is the story's first stored article, so it doesn't reappear when more outlets cover the same story. Feeds are RSS 2.0, built with ElementTree so feed text is always escaped, and every page advertises the Major feeds for readers that look for them.
+
+**The stack feed is the one place a product list leaves the browser.** It has to be in the link, because a feed reader fetches the feed without the browser. The `/feeds` page builds the link from the products saved on My stack and says plainly that SentryFeed's server sees the list on every check, as does anyone the link is shared with. The Pi's gunicorn keeps no access log, so it isn't recorded; a host that logs requests (Vercel does) would record it, and this note should change with the move.
+
 ## Vulnerabilities
 
 `/vulns` answers three questions about a flaw, each from its own source:

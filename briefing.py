@@ -85,6 +85,7 @@ FOOTER = [
     ("How it works", "https://github.com/kaid0x/sentryfeed#how-it-works"),
     ("Sources", "https://github.com/kaid0x/sentryfeed/blob/main/feeds.py"),
     ("Code", "https://github.com/kaid0x/sentryfeed"),
+    ("RSS feeds", "/feeds"),
     ("Built by Haseeb", "https://mhaseebashfaq.com"),
 ]
 
@@ -117,6 +118,8 @@ GLOSSARY = {
                                      "Usually the most serious kind."),
     "ransomware": ("Ransomware", "malware that locks or steals an organisation's data and demands payment to unlock "
                                  "it or not leak it."),
+    "rss": ("RSS", "a feed of new posts that apps like Feedly, NetNewsWire, Outlook or Slack's RSS app can follow, "
+                   "so new stories come to you without visiting the site."),
     "hash": ("Hash", "a fixed-length fingerprint worked out from data. The same input always gives the same hash, "
                      "but the hash can't be turned back into the input."),
     "sec-8k": ("Form 8-K, Item 1.05", "since December 2023, a US-listed company must report a material cyber "
@@ -252,6 +255,13 @@ GULF_NEWS_RE = re.compile(
     r"\b(?:attacks?|attacked|breach\w*|hack\w*|ransomware|leak\w*|vulnerab\w*|flaws?|exploit\w*|"
     r"phishing|scam\w*|fraud\w*|malware|outage|arrest\w*|fined?|law|regulat\w*|ministry|authority|"
     r"council|government|national|CERT|TDRA|NCA|police)\b", re.I)
+
+
+def gulf_stories(stories):
+    """Stories for "In the Gulf": from the regional outlets or naming a GCC country, without vendor news.
+    Returns (stories, how many vendor announcements were left out)."""
+    return gulf_split([s for s in stories if s["severity"] != "blue" and
+                       (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])
 
 
 def gulf_split(stories):

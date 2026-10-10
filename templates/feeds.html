@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}RSS feeds · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .f-head { margin: 28px 0 18px; }
+  .f-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 62ch; }
+  .feeds { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--strong-rule); }
+  .feeds li { padding: 16px 0 18px; border-bottom: 1px solid var(--rule); }
+  .feeds h2, .stack-feed h2, .how h2 { font: 700 22px/1.25 var(--serif); margin: 0 0 4px; }
+  .feeds p { margin: 0 0 10px; max-width: 66ch; }
+  .copy-row { display: flex; gap: 8px; max-width: 720px; }
+  .copy-row input { flex: 1; min-width: 0; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 10px 12px; min-height: 44px; font: 14px var(--mono); }
+  .copy-row button { min-height: 44px; padding: 0 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); font-weight: 700; cursor: pointer; }
+  .copy-row button:hover { background: transparent; color: var(--ink); }
+  .copied { font-size: 14px; color: var(--muted); margin: 6px 0 0; min-height: 1.4em; }
+  .stack-feed, .how { margin-top: 44px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .stack-feed p, .how p, .how li { max-width: 66ch; }
+  .privacy { border-left: 3px solid var(--blue); padding: 6px 12px; margin: 12px 0; } /* the stripe marks the privacy note */
+  .how ul { padding-left: 20px; }
+  .how li { margin-bottom: 6px; }
+  @media (max-width: 600px) { .copy-row { flex-direction: column; } }
+</style>
+{% endblock %}
+
+{% macro copy_row(id, url, label) %}
+<div class="copy-row">
+  <label class="sr-only" for="{{ id }}">{{ label }}</label>
+  <input id="{{ id }}" type="text" readonly value="{{ url }}">
+  <button type="button" class="copy" data-copy="{{ id }}" aria-label="Copy the {{ label }}" hidden>Copy</button>
+</div>
+<p class="copied" id="{{ id }}-status" aria-live="polite"></p>
+{% endmacro %}
+
+{% block body %}
+<main class="wrap">
+  <div class="f-head">
+    <h1>Follow SentryFeed</h1>
+    <p class="standfirst">New stories come to your feed reader, Outlook or Slack through {{ ui.term("rss", "RSS") }}, without visiting the site. Each feed covers the last {{ days }} days and updates every 30 minutes.</p>
+  </div>
+
+  <ul class="feeds">
+    {% for name, title, desc, url in feeds %}
+    <li>
+      <h2>{{ title }}</h2>
+      <p>{{ desc }}</p>
+      {{ copy_row("feed-" ~ name, url, title ~ " feed link") }}
+    </li>
+    {% endfor %}
+  </ul>
+
+  <section class="stack-feed" aria-labelledby="h-stack">
+    <h2 id="h-stack">Your stack</h2>
+    <p>Only the stories about the products you picked on <a href="/stack">My stack</a>.</p>
+    <p class="privacy"><strong>Unlike My stack, this list leaves your browser.</strong> It's part of the feed's link, so SentryFeed's server sees it each time your reader checks for new stories, and so does anyone you share the link with. SentryFeed doesn't log or store it.</p>
+    <div id="stack-feed-out">
+      <p>Your products are kept in your browser, so building this link needs JavaScript. Without it, a link like <code>{{ stack_base }}?stack=fortinet,exchange</code> works too.</p>
+    </div>
+  </section>
+
+  <section class="how" aria-labelledby="h-how">
+    <h2 id="h-how">How to follow a feed</h2>
+    <ul>
+      <li><strong>A feed reader</strong> (Feedly, Inoreader, NetNewsWire): add a new feed and paste the link.</li>
+      <li><strong>Outlook:</strong> right-click RSS Subscriptions (or RSS Feeds), choose to add a new feed, and paste the link.</li>
+      <li><strong>Slack:</strong> add Slack's RSS app to your workspace, then type <code>/feed subscribe</code> and the link in the channel that should get the stories.</li>
+    </ul>
+  </section>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const STACK_BASE = {{ stack_base | tojson }};
+  const NAMES = {{ stack_names | tojson }};
+
+  function wire(button) {
+    const input = document.getElementById(button.dataset.copy);
+    const status = document.getElementById(button.dataset.copy + "-status");
+    button.hidden = false;
+    button.addEventListener("click", async () => {
+      input.focus();
+      input.select();
+      // The clipboard API only works on HTTPS pages; elsewhere the link is selected for Ctrl+C.
+      try {
+        if (!navigator.clipboard || !window.isSecureContext) throw new Error("no clipboard");
+        await navigator.clipboard.writeText(input.value);
+        status.textContent = "Copied.";
+      } catch (e) {
+        status.textContent = "Selected: press Ctrl+C (Cmd+C on a Mac) to copy.";
+      }
+    });
+  }
+  document.querySelectorAll("button.copy").forEach(wire);
+
+  // Your stack: the products saved in this browser, turned into a link.
+  const out = document.getElementById("stack-feed-out");
+  let saved = [];
+  try { saved = JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES); } catch (e) { saved = []; }
+  out.replaceChildren();
+  if (!saved.length) {
+    const p = document.createElement("p");
+    const a = document.createElement("a");
+    a.href = "/stack";
+    a.textContent = "Pick your products on My stack";
+    p.append(a, " first, then come back here for your link.");
+    out.append(p);
+    return;
+  }
+  const names = document.createElement("p");
+  names.textContent = "Products in this link: " + saved.map((p) => NAMES[p]).join(", ") + ".";
+  const row = document.createElement("div");
+  row.className = "copy-row";
+  const label = document.createElement("label");
+  label.className = "sr-only";
+  label.htmlFor = "feed-stack";
+  label.textContent = "Your stack feed link";
+  const input = document.createElement("input");
+  input.id = "feed-stack";
+  input.type = "text";
+  input.readOnly = true;
+  input.value = STACK_BASE + "?stack=" + saved.join(",");
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "copy";
+  button.dataset.copy = "feed-stack";
+  button.setAttribute("aria-label", "Copy your stack feed link");
+  button.textContent = "Copy";
+  row.append(label, input, button);
+  const status = document.createElement("p");
+  status.className = "copied";
+  status.id = "feed-stack-status";
+  status.setAttribute("aria-live", "polite");
+  out.append(names, row, status);
+  wire(button);
+})();
+</script>
+{% endblock %}
