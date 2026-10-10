@@ -96,7 +96,7 @@ NAV = [
     ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
                ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
                ("Patch this first", "/patch", "patch"), ("Vendor track record", "/vendors", "vendors"),
-               ("Ransomware stats", None, None), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
+               ("Ransomware stats", "/ransomware", "ransomware"), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", "/headers", "headers"), ("Domain check", None, None)]),
     ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),

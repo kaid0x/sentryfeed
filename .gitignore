@@ -4,6 +4,7 @@ sentryfeed.db
 .alphavantage_key
 .sec_contact
 .flask_secret
+.ransomware_key
 
 venv/
 __pycache__/

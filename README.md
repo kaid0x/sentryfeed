@@ -41,13 +41,22 @@ app.py ──> dedupe.py   group the same story from different outlets
        └─> briefing.py the front page and map page, and the plain wording
 
 collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
-           └──> vulns.py    CISA's exploited list and EPSS scores, once a day
+           ├──> vulns.py    CISA's exploited list and EPSS scores, once a day
+           └──> ransomware.py  ransomware leak-site claims, counted, once a day
 ```
 
 - **Sources:** The Hacker News, BleepingComputer, Dark Reading, Krebs on Security, Schneier on Security, Microsoft MSRC, TechCrunch, The Verge (AI), MIT Technology Review, and three Gulf sources: The National (technology), Tahawultech and Security Middle East. The list lives in `feeds.py`.
 - **Gulf sources are filtered.** They mix cybersecurity with general tech, vendor and physical-security news (locks, CCTV), so feeds marked `cyber-only` keep only items whose title, summary or tags look like cybersecurity. Plain "security" isn't enough to pass. Gulf News, Khaleej Times and Arab News only offer general news feeds (around 200 items a day), so they aren't used.
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
+
+## Ransomware claims
+
+`/ransomware` counts the attacks ransomware gangs claim on their leak sites: claims per month for the last 12 months, this month so far against last month, the top countries, sectors and gangs, and the GCC on its own. **No victim is named.** The page says plainly that these are claims, not confirmed attacks: gangs exaggerate, repost or invent victims, and victims who pay quickly never appear.
+
+The numbers come from [Ransomware.live](https://www.ransomware.live), under its terms for non-commercial use: it's credited ("Source: Ransomware.live", linked) on the page; `ransomware.py` asks once a day, as a collector step, never on a visitor's request; each month's list is counted straight away and only the counts are stored (by month, country, sector and gang), so victim names are never saved; and the counts appear only on that page, never in `/api/items` or the RSS feeds, since the terms forbid re-serving the data as an API or feed. Using it in a paid product or service would need Ransomware.live's written permission.
+
+With a free API PRO key from my.ransomware.live in `.ransomware_key` (never committed), it uses api-pro. Without one it falls back to the older keyless API, which allows one request a minute, so it counts one month per run and the past year fills in over a few hours. Run `python ransomware.py` to count now.
 
 ## Patch this first
 

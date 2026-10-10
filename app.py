@@ -20,6 +20,7 @@ from dedupe import group_stories
 from geo import locate
 import briefing
 import events
+import ransomware
 import rss
 import stack
 import stocks
@@ -776,6 +777,18 @@ def api_items():
 @app.route("/password")
 def password():
     return render_template("password.html")
+
+
+@app.route("/ransomware")
+def ransomware_stats():
+    def build():
+        conn = connect()
+        try:
+            return ransomware.stats(conn, briefing.GCC)
+        finally:
+            conn.close()
+
+    return page_or_unavailable("ransomware.html", build, active="ransomware", months_wanted=ransomware.MONTHS)
 
 
 @app.route("/headers")

@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Ransomware claims · SentryFeed{% endblock %}
+
+{% macro month_name(m) %}{{ ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][m[5:] | int - 1] }} {{ m[:4] }}{% endmacro %}
+{% macro short_month(m) %}{{ ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m[5:] | int - 1] }}{% endmacro %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .r-head { margin: 28px 0 18px; }
+  .r-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .credit-top { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .claims-note { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--ink); max-width: 70ch; font-size: 15px; }
+  .claims-note strong { font: 700 16px var(--serif); }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); margin: 24px 0 0; }
+  .facts div { padding: 12px 16px 14px 0; }
+  .facts div + div { border-left: 1px solid var(--rule); padding-left: 16px; }
+  .facts dt { font-size: 14px; color: var(--muted); }
+  .facts dd { margin: 4px 0 0; font: 700 32px/1.1 var(--serif); }
+  .facts dd small { display: block; font: 400 14px var(--sans); color: var(--muted); margin-top: 4px; }
+  .section { margin-top: 40px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section h2 { font: 700 24px/1.2 var(--serif); margin: 0 0 6px; }
+  .note { font-size: 14px; color: var(--muted); margin: 0 0 12px; max-width: 70ch; }
+  .chart { display: block; width: 100%; max-width: 820px; height: auto; overflow: visible; }
+  .chart .grid { stroke: var(--rule); }
+  .chart .axis { font: 13px var(--sans); fill: var(--muted); }
+  .chart .bar { fill: var(--ink); }
+  .chart .bar.partial { fill: var(--muted); }
+  .chart .m { outline: none; }
+  .chart .m .hit { fill: transparent; }
+  .chart .m:hover .hit, .chart .m:focus-visible .hit { fill: var(--raised); }
+  .chart .m:focus-visible .hit { stroke: var(--ink); stroke-width: 1.5; }
+  .readout { font-size: 14px; color: var(--muted); min-height: 1.5em; margin: 6px 0 0; }
+  details { margin-top: 6px; font-size: 14px; }
+  summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+  table { border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 6px 18px 6px 0; border-bottom: 1px solid var(--rule); }
+  th { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+  .ranked { list-style: none; margin: 0; padding: 0; }
+  .ranked li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .ranked .bar-track { grid-column: 1 / -1; height: 4px; background: var(--raised); }
+  .ranked .bar-track svg { display: block; width: 100%; height: 4px; }
+  .ranked .bar-track rect { fill: var(--ink); }
+  .ranked .gcc-row { font-weight: 700; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); }
+  .sources { margin-top: 36px; font-size: 14px; color: var(--muted); max-width: 80ch; }
+  @media (max-width: 860px) {
+    .facts { grid-template-columns: 1fr 1fr; }
+    .facts div:nth-child(3) { border-left: 0; padding-left: 0; }
+    .facts div:nth-child(n+3) { border-top: 1px solid var(--rule); }
+    .three { grid-template-columns: 1fr; }
+  }
+</style>
+{% endblock %}
+
+{% macro ranked(items, label_fn, peak, gcc_codes=()) %}
+<ol class="ranked">
+  {% for key, n in items %}
+  <li class="{{ 'gcc-row' if key in gcc_codes }}"><span>{{ label_fn(key) }}</span><span class="num">{{ "{:,}".format(n) }}</span>
+    <span class="bar-track" aria-hidden="true"><svg viewBox="0 0 100 4" preserveAspectRatio="none"><rect width="{{ [n / peak * 100, 0.5] | max }}" height="4"/></svg></span></li>
+  {% endfor %}
+</ol>
+{% endmacro %}
+
+{% macro country_label(cc) %}{{ cc | country }}{% endmacro %}
+{% macro plain_label(s) %}{{ s }}{% endmacro %}
+
+{% block body %}
+<main class="wrap">
+  <div class="r-head">
+    <h1>Ransomware claims</h1>
+    <p class="standfirst">Attacks {{ ui.term("ransomware", "ransomware") }} gangs claim on their leak sites, counted by month, country, sector and gang. Totals only: no victim is named here.</p>
+    <p class="credit-top">Source: <a href="https://www.ransomware.live" rel="noopener noreferrer">Ransomware.live</a></p>
+    <p class="claims-note"><strong>These are claims, not confirmed attacks.</strong> Gangs post victims to pressure them into paying, and sometimes exaggerate, repost old victims or invent them. Victims who pay quickly often never appear. Read the numbers as a measure of how active the gangs are.</p>
+  </div>
+
+{% if error %}
+  <p class="empty">SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+{% elif not data %}
+  <p class="empty">Not counted yet. The collector fetches the numbers from Ransomware.live once a day; on the Pi, <code>python ransomware.py</code> fetches them now.</p>
+{% else %}
+  {% set months_with = data.months | selectattr("total", "ne", none) | list %}
+  {% set period = "Last month counted" if data.covered == 1 else "Last " ~ data.covered ~ " months" %}
+  <dl class="facts">
+    <div><dt>{{ month_name(data.current.month) }} so far</dt><dd>{{ "{:,}".format(data.current.total) if data.current.total is not none else "Not yet" }}<small>claims</small></dd></div>
+    <div><dt>{{ month_name(data.previous.month) }}</dt><dd>{{ "{:,}".format(data.previous.total) if data.previous.total is not none else "Not yet" }}<small>claims</small></dd></div>
+    <div><dt>Last {{ data.covered }} month{{ "s" if data.covered != 1 }}</dt><dd>{{ "{:,}".format(data.year_total) }}<small>claims{% if data.covered < months_wanted %}; {{ months_wanted - data.covered }} more months still being counted{% endif %}</small></dd></div>
+    <div><dt>In the GCC, same period</dt><dd>{{ data.gcc | sum(attribute=1) }}<small>claims naming a GCC country</small></dd></div>
+  </dl>
+
+  <section class="section" aria-labelledby="h-months">
+    <h2 id="h-months">Claims per month</h2>
+    <p class="note">Grouped by the month Ransomware.live files each claim under, usually when the gang posted it. The current month is still filling in{% if data.covered < months_wanted %}, and earlier months fill in as the collector runs{% endif %}.</p>
+    {% set peak = [months_with | map(attribute="total") | max, 1] | max %}
+    {% set W, H, top, left = 720, 170, 12, 44 %}
+    {% set colw = (W - left) / data.months|length %}
+    <svg class="chart" viewBox="0 0 {{ W }} {{ H + 26 }}" data-readout-for="months-readout" role="group" aria-label="Claims per month for the last {{ months_wanted }} months. Tab through the months for counts, or open the table below.">
+      {% for frac in [0, 0.5, 1] %}{% set y = top + (1 - frac) * (H - top) %}
+      <line class="grid" x1="{{ left }}" x2="{{ W }}" y1="{{ y }}" y2="{{ y }}"/>
+      <text class="axis" x="{{ left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ "{:,}".format((peak * frac) | round | int) }}</text>{% endfor %}
+      {% for m in data.months %}
+      {% set x = left + loop.index0 * colw %}
+      {% set text %}{{ month_name(m.month) }}: {% if m.total is none %}not counted yet{% else %}{{ "{:,}".format(m.total) }} claims, {{ m.gcc }} in the GCC{% if loop.last %} (so far){% endif %}{% endif %}{% endset %}
+      <g class="m" tabindex="0" data-readout="{{ text }}" aria-label="{{ text }}">
+        <rect class="hit" x="{{ x + 1 }}" y="{{ top }}" width="{{ colw - 2 }}" height="{{ H - top }}"/>
+        {% if m.total %}{% set h = m.total / peak * (H - top) %}<rect class="bar{{ ' partial' if loop.last }}" x="{{ x + colw * 0.2 }}" y="{{ H - h }}" width="{{ colw * 0.6 }}" height="{{ h }}"/>{% endif %}
+        <text class="axis" x="{{ x + colw / 2 }}" y="{{ H + 18 }}" text-anchor="middle">{{ short_month(m.month) }}</text>
+      </g>
+      {% endfor %}
+    </svg>
+    <p class="readout" id="months-readout" aria-live="polite">Hover or tab through a month for its count. The lighter bar is the month in progress.</p>
+    <details>
+      <summary>Show as a table</summary>
+      <table><thead><tr><th scope="col">Month</th><th scope="col" class="num">Claims</th><th scope="col" class="num">In the GCC</th></tr></thead>
+        <tbody>{% for m in data.months %}<tr><td>{{ month_name(m.month) }}</td><td class="num">{{ "{:,}".format(m.total) if m.total is not none else "not counted yet" }}</td><td class="num">{{ m.gcc if m.gcc is not none else "" }}</td></tr>{% endfor %}</tbody></table>
+    </details>
+  </section>
+
+  <section class="section" aria-label="Where, which sectors and which gangs">
+    <div class="three">
+      <div>
+        <h2>Countries</h2>
+        <p class="note">{{ period }}.{% if data.unknown_country %} {{ "{:,}".format(data.unknown_country) }} claims named no country.{% endif %}</p>
+        {% if data.countries %}{{ ranked(data.countries, country_label, data.countries[0][1], ["AE", "SA", "QA", "KW", "BH", "OM"]) }}{% endif %}
+      </div>
+      <div>
+        <h2>Sectors</h2>
+        <p class="note">{{ period }}.{% if data.unknown_sector %} {{ "{:,}".format(data.unknown_sector) }} had no known sector.{% endif %}</p>
+        {% if data.sectors %}{{ ranked(data.sectors, plain_label, data.sectors[0][1]) }}{% endif %}
+      </div>
+      <div>
+        <h2>Most active gangs</h2>
+        <p class="note">{{ period }}, by claims posted.</p>
+        {% if data.groups %}{{ ranked(data.groups, plain_label, data.groups[0][1]) }}{% endif %}
+        {% if data.groups_now %}<p class="note">So far in {{ month_name(data.current.month) }}: {% for g, n in data.groups_now %}{{ g }} ({{ n }}){{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="h-gcc">
+    <h2 id="h-gcc">In the Gulf</h2>
+    <p class="note">Claims naming a GCC country, {{ period | lower }}.</p>
+    {% set gcc_peak = [data.gcc[0][1], 1] | max %}
+    {{ ranked(data.gcc, country_label, gcc_peak) }}
+  </section>
+{% endif %}
+
+  <p class="sources">Source: <a href="https://www.ransomware.live" rel="noopener noreferrer">Ransomware.live</a>, which tracks ransomware gangs' leak sites. Used under its terms for non-commercial use; it gives no guarantee that a claimed attack happened as described. SentryFeed stores and shows only counts, updated once a day.</p>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const chart = document.querySelector("[data-readout-for]");
+  if (!chart) return;
+  const out = document.getElementById(chart.getAttribute("data-readout-for"));
+  const resting = out.textContent;
+  chart.querySelectorAll("[data-readout]").forEach((mark) => {
+    const show = () => { out.textContent = mark.getAttribute("data-readout"); };
+    mark.addEventListener("mouseenter", show);
+    mark.addEventListener("focus", show);
+  });
+  chart.addEventListener("mouseleave", () => { if (!chart.contains(document.activeElement)) out.textContent = resting; });
+  chart.addEventListener("focusout", (e) => { if (!chart.contains(e.relatedTarget)) out.textContent = resting; });
+})();
+</script>
+{% endblock %}

@@ -5,6 +5,7 @@ from enrich import enrich
 from fetch import fetch_all
 from score import score_all
 from stocks import update as update_stocks
+from ransomware import update as update_ransomware
 from vulns import update as update_vulns
 
 MAX_AGE_DAYS = 14      # ignore anything older; MSRC alone publishes its whole history
@@ -52,6 +53,11 @@ def main():
         update_stocks(conn)
     except Exception as e:
         print(f"Stocks: failed ({e.__class__.__name__}: {e})")
+
+    try:
+        update_ransomware(conn)
+    except Exception as e:
+        print(f"Ransomware stats: failed ({e.__class__.__name__}: {e})")
 
     stats = cve_stats(conn)
     counts = count_by_category(conn)

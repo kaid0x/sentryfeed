@@ -115,6 +115,14 @@ CREATE TABLE IF NOT EXISTS cve_lookups (    -- live lookups from the CVE page, k
     visitor     TEXT NOT NULL,              -- keyed hash of the IP, as for events; never the IP itself
     at          TEXT NOT NULL
 );
+-- Ransomware stats (ransomware.py): counts only. Victim names are never stored.
+CREATE TABLE IF NOT EXISTS ransomware_counts (
+    month       TEXT NOT NULL,              -- YYYY-MM, as Ransomware.live files the claim
+    dimension   TEXT NOT NULL,              -- total, country, sector or group
+    key         TEXT NOT NULL,              -- ISO country code, sector or gang ('' = unknown)
+    count       INTEGER NOT NULL,
+    PRIMARY KEY (month, dimension, key)
+);
 CREATE TABLE IF NOT EXISTS meta (           -- small facts about the database, like when the collector last ran
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
