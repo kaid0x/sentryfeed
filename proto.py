@@ -4,6 +4,7 @@ Three directions built on the same real data so they can be compared side by sid
 A, an operations dashboard; B, an intelligence briefing; C, a map-first situation room.
 Each has a home page and the password check as its tool page, at /proto/<a|b|c>.
 """
+import gzip
 import json
 import re
 import sqlite3
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from flask import abort, render_template
+from flask import abort, render_template, request
 from markupsafe import Markup
 
 import events
@@ -34,7 +35,55 @@ EXPLOITED_RE = re.compile(r"\b(?:exploited|exploiting|exploitation|zero-days?|0-
 _TEMPLATES = Path(__file__).with_name("templates")
 # The map's shapes without the outer <svg> tag, so each prototype can crop it with its own viewBox.
 # The file is built offline by tools/build_world.mjs from Natural Earth, never from feed content.
-WORLD_SHAPES = Markup((_TEMPLATES / "_world.svg").read_text().split("\n", 1)[1].rsplit("</svg>", 1)[0])
+_WORLD_TEXT = (_TEMPLATES / "_world.svg").read_text().split("\n", 1)[1].rsplit("</svg>", 1)[0]
+WORLD_SHAPES = Markup(_WORLD_TEXT)
+_NUMBER = re.compile(r"-?\d+\.\d+")
+_PATH_D = re.compile(r' d="([^"]+)"')
+
+
+def _lite_path(d):
+    """Whole-number coordinates, specks of islands dropped: plenty for a map a few hundred pixels wide."""
+    d = _NUMBER.sub(lambda n: str(round(float(n.group()))), d)
+    keep = []
+    for sub in re.findall(r"M[^M]+", d):
+        pts = [(int(x), int(y)) for x, y in re.findall(r"(-?\d+),(-?\d+)", sub)]
+        xs, ys = [x for x, _ in pts], [y for _, y in pts]
+        if (max(xs) - min(xs)) * (max(ys) - min(ys)) >= 6:
+            keep.append(re.sub(r"L(-?\d+,-?\d+)(?:L\1)+", r"L\1", sub))
+    return "".join(keep)
+
+
+def _lite_world():
+    lines = []
+    for line in _WORLD_TEXT.splitlines():
+        m = _PATH_D.search(line)
+        if m:
+            d = _lite_path(m.group(1))
+            if not d:
+                continue
+            line = line.replace(m.group(1), d)
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _region(x0, y0, x1, y1):
+    """Only the countries that reach into a box, at full detail, for a zoomed-in crop."""
+    lines = []
+    for line in _WORLD_TEXT.splitlines():
+        m = _PATH_D.search(line)
+        if not m:
+            continue
+        xs = [float(v) for v in re.findall(r"(-?[\d.]+),", m.group(1))]
+        ys = [float(v) for v in re.findall(r",(-?[\d.]+)", m.group(1))]
+        if max(xs) >= x0 and min(xs) <= x1 and max(ys) >= y0 and min(ys) <= y1:
+            lines.append(line)
+    return "\n".join(lines)
+
+
+WORLD_LITE = Markup(_lite_world())          # about 30% smaller than the full map
+GULF_VIEW = (548, 112, 150, 100)            # x, y, width, height of the Gulf crop
+GULF_SHAPES = Markup(_region(GULF_VIEW[0] - 10, GULF_VIEW[1] - 10,
+                             GULF_VIEW[0] + GULF_VIEW[2] + 10, GULF_VIEW[1] + GULF_VIEW[3] + 10))
 _POINTS = json.loads((_TEMPLATES / "_world_points.json").read_text())
 CENTRES = _POINTS["points"]
 NAMES = {**_POINTS["names"], **COUNTRY_NAMES}
@@ -50,13 +99,138 @@ FOOTER = [
 def nav(d):
     """The grouped navigation being tested. A None link is a planned page, shown but not linked."""
     return [
-        ("Intel", [("Feed", "/"), ("Map", "/map"), ("Stocks", "/stocks"), ("My stack", "/stack"),
+        ("Intel", [("Feed", "/"), ("Map", "/proto/b/map" if d == "b" else "/map"), ("Stocks", "/stocks"), ("My stack", "/stack"),
                    ("Vulnerabilities", None), ("Ransomware stats", None),
                    ("Weekly digest", None), ("Gulf pulse", None)]),
         ("Tools", [("Password check", f"/proto/{d}/password"), ("File & link check", "/scan"),
                    ("Email header analyser", None), ("Domain check", None)]),
         ("Community", [("Events", "/events"), ("Submit an event", "/events/submit")]),
     ]
+
+
+# ---------- Plainer words (display only; score.py and the live site are unchanged) ----------
+
+MS_KINDS = ("Remote Code Execution", "Elevation of Privilege", "Information Disclosure",
+            "Security Feature Bypass", "Denial of Service", "Spoofing", "Tampering")
+_MS_TITLE = re.compile(rf"^(?:CVE-\d{{4}}-\d+\s+)?(.+?)\s+({'|'.join(MS_KINDS)})\s+Vulnerability$")
+_CHROMIUM = re.compile(r"^Chromium:\s*CVE-\d{4}-\d+\s+(.+)$")
+
+
+def clean_title(story):
+    """Microsoft's advisory titles, "CVE-2026-72979 Windows DHCP Server Remote Code Execution
+    Vulnerability", read as "Windows DHCP Server: remote code execution flaw". Others are untouched."""
+    title = story["title"] or ""
+    if story["source"] != "Microsoft MSRC":
+        return title
+    m = _MS_TITLE.match(title)
+    if m:
+        return f"{m.group(1)}: {m.group(2).lower()} flaw"
+    m = _CHROMIUM.match(title)
+    if m:
+        return f"Chrome and Edge: {m.group(1)[0].lower()}{m.group(1)[1:]}"
+    return re.sub(r"^CVE-\d{4}-\d+\s+", "", title)
+
+
+# The scorer's matched keyword, in words a reader would use.
+KEYWORD_WORDS = {
+    "actively exploited": "Reported as actively exploited", "actively exploiting": "Reported as actively exploited",
+    "under active exploitation": "Reported as actively exploited", "mass exploitation": "Mass exploitation reported",
+    "exploited in the wild": "Exploited in the wild", "exploitation in the wild": "Exploited in the wild",
+    "zero-day": "Zero-day", "zero-days": "Zero-days", "zero day": "Zero-day", "0-day": "Zero-day", "0-days": "Zero-days",
+    "critical": "Described as critical", "remote code execution": "Remote code execution", "rce": "Remote code execution",
+    "ransomware": "Ransomware", "data breach": "Data breach", "data breaches": "Data breach",
+    "breach": "Breach", "breached": "Breach", "breaches": "Breach",
+    "backdoor": "Backdoor", "backdoored": "Backdoor", "backdoors": "Backdoor",
+    "nation-state": "State-backed hackers", "nation state": "State-backed hackers",
+    "malware": "Malware", "hacked": "Hack", "compromise": "Systems compromised", "compromised": "Systems compromised",
+    "stolen": "Data stolen", "leak": "Data leak", "leaked": "Data leak", "leaks": "Data leak",
+    "exploit": "Exploit", "exploits": "Exploit", "exploited": "Exploited",
+    "data theft": "Data theft", "credential theft": "Credential theft", "extortion": "Extortion",
+    "wiper": "Wiper malware", "wipers": "Wiper malware", "worm": "Worm", "worms": "Worm", "spyware": "Spyware",
+    "stealer": "Info-stealer", "stealers": "Info-stealer", "infostealer": "Info-stealer", "infostealers": "Info-stealer",
+    "botnet": "Botnet", "botnets": "Botnet", "ddos": "DDoS attack", "sql injection": "SQL injection",
+    "auth bypass": "Login bypass", "authentication bypass": "Login bypass", "privilege escalation": "Privilege escalation",
+}
+
+
+def _keyword(word):
+    word = word.lower()
+    if word in KEYWORD_WORDS:
+        return KEYWORD_WORDS[word]
+    if word.startswith(("supply-chain", "supply chain")):
+        return "Supply-chain attack"
+    if word.startswith(("take", "takeover")):
+        return "Takeover"
+    if word.startswith("malicious"):
+        return word.capitalize()
+    return word.capitalize()
+
+
+def plain_reason(reason):
+    """ "mentions 'rce'" becomes "Remote code execution"; "CVSS 9.8" becomes "Rated 9.8 out of 10"."""
+    if not reason or reason.startswith("no severity"):
+        return ""
+    head, _, tail = reason.partition(", ")
+    tail = f", {tail}" if tail else ""
+    if head == "CISA: actively exploited":
+        return "CISA says it's being exploited" + tail
+    m = re.fullmatch(r"CVSS ([\d.]+)(?: \+ mentions '(.+)')?", head)
+    if m:
+        if m.group(2):
+            return f"{_keyword(m.group(2))}, rated {m.group(1)} out of 10{tail}"
+        return f"Rated {m.group(1)} out of 10{tail}"
+    m = re.fullmatch(r"mentions '(.+)'", head)
+    if m:
+        return _keyword(m.group(1)) + tail
+    return reason[0].upper() + reason[1:]
+
+
+def group_advisories(stories):
+    """Microsoft publishes one advisory per flaw, often several a day. On the front page they
+    become one item, so three CVE titles don't push the day's real news off the top."""
+    ms = [s for s in stories if s["source"] == "Microsoft MSRC"]
+    if len(ms) < 2:
+        return stories
+    ms = by_importance(ms)
+    major = sum(1 for s in ms if s["severity"] == "red")
+    lead = ms[0]
+    group = {
+        **lead,
+        "title": f"Microsoft: {len(ms)} security advisories in the last 24 hours",
+        "headline": f"Microsoft: {len(ms)} security advisories in the last 24 hours",
+        "link": "https://msrc.microsoft.com/update-guide",
+        "summary": "",
+        "also": [],
+        "cves": sorted({c for s in ms for c in s["cves"]}),
+        "kev": int(any(s["kev"] for s in ms)),
+        "where": [], "blamed": [],
+        "severity_reason": "",
+        "reason": f"{major} rated Major" if major else "",
+        "items": [{"title": s["headline"], "link": s["link"], "severity": s["severity"],
+                   "cves": s["cves"], "reason": s["reason"]} for s in ms],
+    }
+    return [s for s in stories if s["source"] != "Microsoft MSRC"] + [group]
+
+
+# The regional feeds carry a lot of vendor news, which often names the UAE or Saudi Arabia as a
+# market. Their stories stay only if serious or about an incident, a flaw or the authorities.
+# Stories from the international outlets that name a GCC country are news by definition.
+GULF_NEWS_RE = re.compile(
+    r"\b(?:attacks?|attacked|breach\w*|hack\w*|ransomware|leak\w*|vulnerab\w*|flaws?|exploit\w*|"
+    r"phishing|scam\w*|fraud\w*|malware|outage|arrest\w*|fined?|law|regulat\w*|ministry|authority|"
+    r"council|government|national|CERT|TDRA|NCA|police)\b", re.I)
+
+
+def gulf_split(stories):
+    kept, dropped = [], 0
+    for s in stories:
+        regional = s.get("category") == "regional"
+        if (s["severity"] in ("red", "orange") or GULF_NEWS_RE.search(s["title"] or "")
+                or (not regional and GCC & set(s["where"] + s["blamed"]))):
+            kept.append(s)
+        else:
+            dropped += 1
+    return kept, dropped
 
 
 def by_importance(stories):
@@ -140,6 +314,10 @@ def home_data(app_mod):
     stories = app_mod.load_items(14)
     app_mod.attach_stock_summaries(stories)
 
+    for s in stories:
+        s["headline"] = clean_title(s)
+        s["reason"] = plain_reason(s["severity_reason"])
+
     def within(hours):
         cutoff = (now - timedelta(hours=hours)).isoformat()
         return [s for s in stories if not s["published"] or s["published"] >= cutoff]
@@ -148,6 +326,9 @@ def home_data(app_mod):
     security_day = [s for s in day if s["severity"] in SECURITY]
     security_week = [s for s in week if s["severity"] in SECURITY]
     placed_week = [s for s in security_week if s["where"] or s["blamed"]]
+
+    gulf = gulf_split([s for s in week if s["severity"] != "blue" and
+                       (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])
 
     conn = connect()
     try:
@@ -177,13 +358,14 @@ def home_data(app_mod):
             "week": len(security_week),
             "placed_week": len(placed_week),
         },
-        "top": by_importance(security_day)[:HOME_STORIES],
+        "top": by_importance(group_advisories(security_day))[:HOME_STORIES],
         "exploited": by_importance([s for s in security_week
                                     if s["kev"] or EXPLOITED_RE.search(s["title"] or "")])[:5],
-        "gulf": by_importance([s for s in week if s["severity"] != "blue" and
-                               (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])[:5],
+        "gulf": by_importance(gulf[0])[:5],
+        "gulf_dropped": gulf[1],
         "unplaced": by_importance([s for s in security_week if not (s["where"] or s["blamed"])])[:5],
         "placed": by_importance(placed_week),
+        "all_unplaced": len(security_week) - len(placed_week),
         "map": country_map(placed_week),
         "hours": hour_strip(day, now),
         "days": daily(stories, now),
@@ -206,7 +388,8 @@ def register(app, app_mod):
         if d not in DIRECTIONS:
             abort(404)
         return {"d": d, "direction": DIRECTIONS[d], "nav": nav(d), "footer": FOOTER, "severities": dict(app_mod.SEVERITIES),
-                "names": NAMES, "world": WORLD_SHAPES, "centres": CENTRES}
+                "names": NAMES, "world": WORLD_SHAPES, "world_lite": WORLD_LITE, "gulf_shapes": GULF_SHAPES,
+                "gulf_view": " ".join(map(str, GULF_VIEW)), "centres": CENTRES}
 
     @app.route("/proto")
     def proto_index():
@@ -221,6 +404,32 @@ def register(app, app_mod):
             data, error = None, type(exc).__name__
         page = render_template(f"proto/{d}_home.html", **ctx, data=data, error=error, page="home")
         return (page, 503) if error else page
+
+    @app.route("/proto/<d>/map")
+    def proto_map(d):
+        if d != "b":
+            abort(404)      # only B has its own map page; C is a map already
+        ctx = common(d)
+        try:
+            data, error = home_data(app_mod), None
+        except (sqlite3.Error, OSError) as exc:
+            data, error = None, type(exc).__name__
+        page = render_template("proto/b_map.html", **ctx, data=data, error=error, page="map")
+        return (page, 503) if error else page
+
+    @app.after_request
+    def compress(resp):
+        """Gzip prototype pages: the map's SVG shrinks to about a third. Only /proto pages, which hold
+        no secrets and reflect no form input, so compression can't leak anything (the BREACH attack)."""
+        if (request.path.startswith("/proto") and resp.status_code in (200, 503) and resp.mimetype == "text/html"
+                and not resp.direct_passthrough and "gzip" in request.headers.get("Accept-Encoding", "")
+                and "Content-Encoding" not in resp.headers):
+            body = resp.get_data()
+            if len(body) > 1024:
+                resp.set_data(gzip.compress(body, compresslevel=6))
+                resp.headers["Content-Encoding"] = "gzip"
+                resp.headers["Vary"] = "Accept-Encoding"
+        return resp
 
     @app.route("/proto/<d>/password")
     def proto_password(d):

@@ -2,7 +2,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-{{ ui.head(page_title) }}
+{{ ui.head(page_title, "light") }}
 <style nonce="{{ csp_nonce }}">
   /* B, The Briefing. Warm paper and ink: the page is read, not monitored, and warm neutrals cut
      glare for reading while keeping it apart from the cold blue-grey of security dashboards. */
@@ -69,19 +69,26 @@
   .site-footer ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 28px; font-size: 14px; }
   .site-footer a { display: inline-block; padding: 10px 0; }
 
+  /* Slim masthead: on the map page, and on every page on phones, so the news starts on the first screen. */
+  .masthead.slim .nameplate { font-size: 34px; margin: 12px 0 2px; }
+  .masthead.slim .tagline { font-size: 14px; margin-bottom: 10px; }
+
   @media (max-width: 760px) {
     .wrap { padding: 0 16px; }
     .menus-row { display: none; }
     .menu-mobile { display: block; width: 100%; background: none; border: 0; min-height: 44px; font: 600 15px var(--sans); cursor: pointer; }
-    .dateline { flex-wrap: wrap; justify-content: center; }
-    .dateline .updated { order: 3; width: 100%; }
+    .dateline { padding-bottom: 6px; }
+    .theme-toggle { min-height: 44px; }
+    .dateline .updated { display: none; } /* the home page repeats it under the top line */
+    .nameplate, .masthead.slim .nameplate { font-size: 32px; margin: 10px 0 0; }
+    .tagline, .masthead.slim .tagline { font-size: 13px; margin: 0 0 8px; }
   }
 </style>
 {% block styles %}{% endblock %}
 </head>
 <body>
 <div class="wrap">
-<header class="masthead">
+<header class="masthead {% block masthead_class %}{% endblock %}">
   <div class="dateline">
     <time datetime="{{ now_iso }}">{% block dateline %}{% endblock %}</time>
     <span class="updated">{% block updated %}{% endblock %}</span>

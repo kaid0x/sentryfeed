@@ -15,14 +15,23 @@
   {% if s.blamed %}<span class="blamed">Blamed: {{ s.blamed | map("country") | join(", ") }}</span>{% endif %}
   {% if long and s.stock %}<span>{{ s.stock.company }} ({{ s.stock.display_ticker }}) is listed</span>{% endif %}
 </p>
-{% if s.cves %}<p class="cves">{% for c in s.cves[:4] %}<a href="https://nvd.nist.gov/vuln/detail/{{ c }}" rel="noopener noreferrer">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
+{% if s.cves and not s.get("items") %}<p class="cves">{% for c in s.cves[:4] %}<a href="https://nvd.nist.gov/vuln/detail/{{ c }}" rel="noopener noreferrer">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
 {% endmacro %}
 
 {% macro headline(s, tag="h3", cls="") %}
-<{{ tag }} class="{{ cls }}">{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.title }}</a>{% else %}{{ s.title }}{% endif %}</{{ tag }}>
+{% set text = s.get("headline") or s.title %}
+<{{ tag }} class="{{ cls }}">{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ text }}</a>{% else %}{{ text }}{% endif %}</{{ tag }}>
+{% if s.get("items") %}
+<ul class="advisories">
+  {% for i in s["items"][:4] %}
+  <li class="sev-{{ i.severity }}"><strong>{{ ui.sev_word(i.severity) }}.</strong> {% if i.link %}<a href="{{ i.link }}" rel="noopener noreferrer">{{ i.title }}</a>{% else %}{{ i.title }}{% endif %}{% if i.cves %} <span class="cve">{{ i.cves[0] }}</span>{% endif %}</li>
+  {% endfor %}
+  {% if s["items"]|length > 4 %}<li class="more">and {{ s["items"]|length - 4 }} more in <a href="{{ s.link }}" rel="noopener noreferrer">Microsoft's update guide</a></li>{% endif %}
+</ul>
+{% endif %}
 {% endmacro %}
 
-{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {% if s.kev %}On CISA's exploited list.{% elif s.severity_reason and not s.severity_reason.startswith("no severity") %}{{ s.severity_reason }}{% endif %}</p>{% endmacro %}
+{% macro kicker(s) %}<p class="kicker sev-{{ s.severity }}"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason }}</p>{% endmacro %}
 
 {% block styles %}
 <style nonce="{{ csp_nonce }}">
@@ -30,6 +39,8 @@
   .topline b { font-weight: 700; }
   .topline .n-major { color: var(--red); }
   .topline-note { text-align: center; color: var(--muted); font-size: 14px; margin: 10px 0 0; }
+  .phone-only { display: none; }
+  @media (max-width: 760px) { .phone-only { display: inline; } }
 
   .stack-strip { margin: 28px auto 0; max-width: 900px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 12px 0; font-size: 15px; text-align: center; }
   .stack-strip p { margin: 0; }
@@ -58,6 +69,12 @@
   .side article:last-child { border-bottom: 0; }
   .side-head { font: 700 21px/1.22 var(--serif); margin: 0 0 8px; }
   .more-link { display: inline-block; font-weight: 600; padding: 10px 0; }
+  .advisories { list-style: none; margin: 0 0 10px; padding: 0; font-size: 15px; }
+  .advisories li { padding: 5px 0; border-top: 1px solid var(--rule); }
+  .advisories strong { color: var(--sev); font: 700 14px var(--serif); }
+  .advisories a { text-decoration: none; } .advisories a:hover { text-decoration: underline; }
+  .advisories .cve { font: 12.5px var(--mono); color: var(--muted); white-space: nowrap; }
+  .advisories .more { color: var(--muted); }
 
   /* Sections: a heavy rule and a serif title, the way a paper opens a new page */
   .section { margin-top: 56px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
@@ -79,9 +96,10 @@
   figure { margin: 0; }
   figcaption { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .bmap { display: block; width: 100%; height: auto; background: var(--raised); }
-  .world-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
-  #world-shapes .country { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
-  #world-shapes .country.dot { display: none; }
+  .bmap .country { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
+  .bmap .country.dot { display: none; }
+  .map-link { display: block; }
+  .map-link:hover .bmap { outline: 1px solid var(--ink); }
   .bmap .gulf-label { font: 600 4px var(--sans); fill: var(--ink); }
   .bmap .link { fill: none; stroke: var(--purple); stroke-width: 1.2; }
 
@@ -119,7 +137,7 @@
     .markets .story-col { display: none; }
   }
 </style>
-{% if data %}{{ ui.map_fills("#world-shapes", data.map) }}{% endif %}
+{% if data %}{{ ui.map_fills(".bmap", data.map) }}{% endif %}
 {% endblock %}
 
 {% block body %}
@@ -131,18 +149,15 @@
   </div>
 {% else %}
   {% set c = data.counts %}
-  <h1 class="topline">In the last 24 hours: <b class="{{ 'n-major' if c.major }}">{{ words(c.major, "Major incident", "Major incidents") }}</b>,
+  <h1 class="topline">In the last 24 hours: <b class="{{ 'n-major' if c.major }}">{{ words(c.major, "Major story", "Major stories") }}</b>,
     <b>{{ words(c.exploited, "story", "stories") }}</b> about flaws on CISA's exploited list, and
     <b>{{ words(c.companies, "breached listed company", "breached listed companies") }}</b>.</h1>
-  <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.</p>
+  <p class="topline-note">From {{ ui.plural(c.day, "story", "stories") }} SentryFeed read since this time yesterday.{% if data.collected %}<span class="phone-only"> Updated {{ data.collected.strftime("%H:%M") }} Dubai time.</span>{% endif %}</p>
 
   <section class="stack-strip" aria-label="Your stack">
     <div id="stack-out"><p>Checking your stack…</p></div>
     <noscript><p>Your stack is kept in this browser, so it needs JavaScript. <a href="/stack">Open My stack</a>.</p></noscript>
   </section>
-
-  {# The country shapes, defined once and drawn by both maps below with <use>. #}
-  <svg class="world-defs" aria-hidden="true" focusable="false"><defs><g id="world-shapes">{{ world }}</g></defs></svg>
 
   <h2 class="sr-only">Top stories</h2>
   {% if data.top %}
@@ -191,12 +206,12 @@
   <section class="section" aria-labelledby="h-gulf">
     <div class="section-head">
       <h2 id="h-gulf">In the Gulf</h2>
-      <p class="section-note">Last 7 days. Stories from The National, Tahawultech and Security Middle East, plus any story naming a GCC country.</p>
+      <p class="section-note">Last 7 days. Stories from The National, Tahawultech and Security Middle East, plus any story naming a GCC country.{% if data.gulf_dropped %} {{ ui.plural(data.gulf_dropped, "vendor announcement", "vendor announcements") }} left out.{% endif %}</p>
     </div>
     <div class="gulf">
       <figure>
-        <svg class="bmap gulf-map" viewBox="548 112 150 100" role="img" aria-label="Map of the Gulf. {% set gcc = data.map.countries | selectattr('cc', 'in', ['AE','SA','QA','KW','BH','OM']) | list %}{% if gcc %}Countries with stories: {% for g in gcc %}{{ g.name }} ({{ g.count }}){{ ', ' if not loop.last }}{% endfor %}.{% else %}No GCC country named in a story this week.{% endif %}">
-          <use href="#world-shapes"/>
+        <svg class="bmap gulf-map" viewBox="{{ gulf_view }}" role="img" aria-label="Map of the Gulf. {% set gcc = data.map.countries | selectattr('cc', 'in', ['AE','SA','QA','KW','BH','OM']) | list %}{% if gcc %}Countries with stories: {% for g in gcc %}{{ g.name }} ({{ g.count }}){{ ', ' if not loop.last }}{% endfor %}.{% else %}No GCC country named in a story this week.{% endif %}">
+          {{ gulf_shapes }}
           {# Bahrain and Qatar sit too close to label both, so their labels are nudged apart. #}
           {% for cc, dx, dy in [("AE", 4, 2), ("SA", 0, 0), ("OM", 0, 0), ("KW", 0, -2), ("QA", -3, 5), ("BH", -5, -2)] %}{% set p = centres[cc] %}<text class="gulf-label" x="{{ p[0] + dx }}" y="{{ p[1] + dy }}" text-anchor="middle">{{ cc }}</text>{% endfor %}
         </svg>
@@ -247,14 +262,16 @@
       <div>
         <h3>Where it happened</h3>
         {% if data.map.countries %}
-        <svg class="bmap" viewBox="0 -2 960 422" role="img" aria-label="World map shading {{ data.map.countries|length }} countries named in this week's stories.">
-          <use href="#world-shapes"/>
+        <a class="map-link" href="/proto/b/map" aria-label="Open the map: {{ data.map.countries|length }} countries named in this week's stories">
+        <svg class="bmap" viewBox="0 -2 960 422" aria-hidden="true" focusable="false">
+          {{ world_lite }}
           {% for l in data.map.lines %}<path class="link" d="{{ l.path }}"/>{% endfor %}
         </svg>
+        </a>
         <ul class="country-counts">
           {% for co in data.map.countries[:6] %}<li>{{ co.name }} <b>{{ co.count }}</b></li>{% endfor %}
         </ul>
-        <p class="section-note">{{ c.placed_week }} of {{ c.week }} stories this week named a country. <a href="/map?days=7">Open the map</a>.</p>
+        <p class="section-note">{{ c.placed_week }} of {{ c.week }} stories this week named a country. <a href="/proto/b/map">Open the map</a>.</p>
         {% else %}
         <p class="empty">No story this week named a country.</p>
         {% endif %}
