@@ -31,7 +31,7 @@ REFRESH_EVERY = timedelta(hours=20)    # once a day, whichever collector run com
 EPSS_BATCH = 100                       # the API takes up to 100 CVEs per request
 NEWS_DAYS = 14                         # EPSS for CVEs in the news this long
 DETAILS_FOR_NEW_KEV_DAYS = 30          # NVD descriptions fetched ahead for recent KEV additions
-DETAILS_BUDGET = 40                    # ... at most this many per run
+DETAILS_BUDGET = 100                   # ... at most this many per run (then the rest of the catalogue, oldest gaps last)
 
 # Live lookups (a CVE nobody has asked about yet). Each costs the Pi a few seconds and
 # uses the NVD key's quota, so they're limited per visitor and per day.
@@ -124,6 +124,10 @@ def fill_recent_kev_details(conn, log):
     for row in conn.execute("SELECT cves FROM items WHERE cves != '' AND published >= ? ORDER BY published DESC",
                             (news_since,)):
         missing += [c for c in row["cves"].split(",") if c not in have and c not in missing]
+    # Then the rest of CISA's catalogue: the vendor track record needs each flaw's publication date.
+    queued = set(missing)
+    missing += [r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev ORDER BY date_added DESC")
+                if r["cve_id"] not in have and r["cve_id"] not in queued]
     done = 0
     for cve_id in missing[:min(DETAILS_BUDGET, pace["budget"])]:
         try:
@@ -358,6 +362,92 @@ def patch_queue(conn, stories, product_match=None):
         })
     rows.sort(key=lambda r: (-r["total"], -(r["epss"] or 0), r["cve_id"]))
     return rows[:QUEUE_SIZE]
+
+
+# ---------- Vendor track record ----------
+
+KEV_LAUNCH_DAY = "2021-11-03"   # CISA's list began with hundreds of older flaws added at once
+LISTED_SOON_DAYS = 30
+
+
+def vendor_slug(name):
+    return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
+
+
+def cve_year(cve_id):
+    return int(cve_id.split("-")[1])
+
+
+def vendor_index(conn):
+    """Every vendor on CISA's list: [{vendor, slug, total, added_this_year, ransomware, top_product}], most first."""
+    year = str(today().year)
+    vendors = {}
+    for r in conn.execute("SELECT cve_id, vendor, product, date_added, ransomware FROM kev"):
+        v = vendors.setdefault(r["vendor"], {"vendor": r["vendor"], "slug": vendor_slug(r["vendor"]), "total": 0,
+                                             "added_this_year": 0, "ransomware": 0, "products": {}})
+        v["total"] += 1
+        v["added_this_year"] += r["date_added"].startswith(year)
+        v["ransomware"] += r["ransomware"]
+        v["products"][r["product"]] = v["products"].get(r["product"], 0) + 1
+    rows = []
+    for v in vendors.values():
+        products = v.pop("products")
+        product, count = max(products.items(), key=lambda kv: (kv[1], kv[0]))
+        rows.append({**v, "top_product": product, "top_product_count": count, "product_names": sorted(products)})
+    rows.sort(key=lambda v: (-v["total"], v["vendor"].lower()))
+    return rows
+
+
+def vendor_detail(conn, slug):
+    """One vendor's record, or None if CISA has never listed it."""
+    rows = [dict(r) for r in conn.execute(
+        """SELECT k.*, d.published FROM kev k LEFT JOIN cve_details d ON d.cve_id = k.cve_id
+           ORDER BY k.date_added DESC, k.cve_id DESC""")]
+    rows = [r for r in rows if vendor_slug(r["vendor"]) == slug]
+    if not rows:
+        return None
+    this_year = today().year
+    # Exploited flaws by the year they were disclosed (the year in the CVE ID), first year to now.
+    by_year = {}
+    for r in rows:
+        by_year[cve_year(r["cve_id"])] = by_year.get(cve_year(r["cve_id"]), 0) + 1
+    first = min(by_year)
+    years = [{"year": y, "count": by_year.get(y, 0)} for y in range(min(first, this_year - 5), this_year + 1)]
+    # Products with more than one exploited flaw.
+    products = {}
+    for r in rows:
+        p = products.setdefault(r["product"], {"product": r["product"], "count": 0, "first": r["date_added"],
+                                               "latest": r["date_added"], "ransomware": 0})
+        p["count"] += 1
+        p["first"] = min(p["first"], r["date_added"])
+        p["latest"] = max(p["latest"], r["date_added"])
+        p["ransomware"] += r["ransomware"]
+    repeats = sorted((p for p in products.values() if p["count"] > 1), key=lambda p: (-p["count"], p["product"]))
+    # Days from publication to CISA's listing, leaving out the launch-day batch.
+    gaps = sorted((date.fromisoformat(r["date_added"]) - date.fromisoformat(r["published"][:10])).days
+                  for r in rows if r["published"] and r["date_added"] != KEV_LAUNCH_DAY)
+    gaps = [g for g in gaps if g >= 0]
+    eligible = sum(1 for r in rows if r["date_added"] != KEV_LAUNCH_DAY)
+    timing = None
+    if gaps:
+        mid = len(gaps) // 2
+        median = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) // 2
+        timing = {"median": median, "soon": sum(1 for g in gaps if g <= LISTED_SOON_DAYS), "n": len(gaps),
+                  "eligible": eligible}
+    return {
+        "vendor": rows[0]["vendor"],
+        "total": len(rows),
+        "added_this_year": sum(1 for r in rows if r["date_added"].startswith(str(this_year))),
+        "added_last_year": sum(1 for r in rows if r["date_added"].startswith(str(this_year - 1))),
+        "ransomware": sum(r["ransomware"] for r in rows),
+        "products": len(products),
+        "years": years,
+        "repeats": repeats,
+        "timing": timing,
+        "latest": rows[:10],
+        "first_added": min(r["date_added"] for r in rows),
+        "this_year": this_year,
+    }
 
 
 # ---------- Plain words ----------

@@ -54,7 +54,7 @@
     {% else %}<strong>Not on CISA's list.</strong>{% endif %}
   </p>
   <h1>{{ title or cve_id }}</h1>
-  <p class="cve-id">{% if title %}{{ cve_id }}{% if kev %} · {{ kev.vendor }} {{ kev.product }}{% endif %}{% if details and details.published %} · {% endif %}{% endif %}{% if details and details.published %}Published {{ details.published[:10] }}{% endif %}</p>
+  <p class="cve-id">{% if title %}{{ cve_id }}{% if kev %} · <a href="/vendors/{{ kev.vendor_slug }}">{{ kev.vendor }}</a> {{ kev.product }}{% endif %}{% if details and details.published %} · {% endif %}{% endif %}{% if details and details.published %}Published {{ details.published[:10] }}{% endif %}</p>
   {% if note %}<p class="note" role="status">{{ note }}</p>{% endif %}
 
   <section class="answers" aria-label="Three questions about this flaw">

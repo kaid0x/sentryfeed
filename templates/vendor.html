@@ -1,0 +1,150 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}{{ r.vendor }}: track record · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .crumb { margin: 24px 0 0; font-size: 14px; }
+  .vendor h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 10px 0 8px; }
+  .not-a-rating { margin: 0 0 20px; padding: 10px 14px; border: 1px solid var(--ink); max-width: 70ch; font-size: 15px; }
+  .not-a-rating strong { font: 700 16px var(--serif); }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 2px solid var(--strong-rule); border-bottom: 1px solid var(--rule); margin: 0; }
+  .facts div { padding: 12px 16px 14px 0; }
+  .facts div + div { border-left: 1px solid var(--rule); padding-left: 16px; }
+  .facts dt { font-size: 14px; color: var(--muted); }
+  .facts dd { margin: 4px 0 0; font: 700 32px/1.1 var(--serif); }
+  .facts dd small { display: block; font: 400 14px var(--sans); color: var(--muted); margin-top: 4px; }
+  .section { margin-top: 40px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section h2 { font: 700 24px/1.2 var(--serif); margin: 0 0 6px; }
+  .note { font-size: 14px; color: var(--muted); margin: 0 0 12px; max-width: 70ch; }
+  .chart { display: block; width: 100%; max-width: 760px; height: auto; overflow: visible; }
+  .chart .grid { stroke: var(--rule); }
+  .chart .axis { font: 14px var(--sans); fill: var(--muted); }
+  .chart .bar { fill: var(--ink); }
+  .chart .year { outline: none; }
+  .chart .year .hit { fill: transparent; }
+  .chart .year:hover .hit, .chart .year:focus-visible .hit { fill: var(--raised); }
+  .chart .year:focus-visible .hit { stroke: var(--ink); stroke-width: 1.5; }
+  .readout { font-size: 14px; color: var(--muted); min-height: 1.5em; margin: 6px 0 0; }
+  details { margin-top: 6px; font-size: 14px; }
+  summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+  table { border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 6px 18px 6px 0; border-bottom: 1px solid var(--rule); }
+  th { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: 8px 0; border-bottom: 1px solid var(--rule); }
+  .list .cve { font: 13.5px var(--mono); }
+  .list .meta { display: block; font-size: 13px; color: var(--muted); }
+  .list a.title { font: 600 17px var(--serif); text-decoration: none; } .list a.title:hover { text-decoration: underline; }
+  .empty { font: italic 17px/1.5 var(--serif); color: var(--muted); margin: 0; }
+  @media (max-width: 760px) {
+    .facts { grid-template-columns: 1fr 1fr; }
+    .facts div:nth-child(3) { border-left: 0; padding-left: 0; }
+    .facts div:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap vendor">
+  <p class="crumb"><a href="/vendors">Vendor track record</a></p>
+  <h1>{{ r.vendor }}</h1>
+  <p class="not-a-rating"><strong>A track record, not a security rating.</strong> Every flaw in {{ r.vendor }}'s products that CISA has confirmed was exploited, since its list began. Bigger vendors have more products and more attackers looking, so compare patterns, not totals.</p>
+
+  <dl class="facts">
+    <div><dt>Exploited flaws</dt><dd>{{ r.total }}<small>in {{ ui.plural(r.products, "product", "products") }}</small></dd></div>
+    <div><dt>Added to CISA's list in {{ r.this_year }}</dt><dd>{{ r.added_this_year }}<small>{{ r.added_last_year }} in {{ r.this_year - 1 }}</small></dd></div>
+    <div><dt>Used by {{ ui.term("ransomware", "ransomware") }}</dt><dd>{{ r.ransomware }}<small>of {{ r.total }}, says CISA</small></dd></div>
+    <div><dt>Disclosure to CISA's list</dt>
+      {% if r.timing and r.timing.n >= timing_min %}
+      <dd>{{ r.timing.median }} days<small>median; {{ r.timing.soon }} of {{ r.timing.n }} listed within {{ soon_days }} days</small></dd>
+      {% else %}
+      <dd>Not yet<small>{{ r.timing.n if r.timing else 0 }} of {{ r.timing.eligible if r.timing else r.total }} flaws dated so far; filling in daily</small></dd>
+      {% endif %}
+    </div>
+  </dl>
+
+  <section class="section" aria-labelledby="h-years">
+    <h2 id="h-years">Exploited flaws by the year they were disclosed</h2>
+    <p class="note">The year in each CVE ID, roughly when the flaw became public. Recent years can still grow: flaws are often exploited, and listed, years later.</p>
+    {% set peak = [r.years | map(attribute="count") | max, 1] | max %}
+    {% set W, H, top, left = 640, 160, 10, 30 %}
+    {% set colw = (W - left) / r.years|length %}
+    <svg class="chart" viewBox="0 0 {{ W }} {{ H + 24 }}" data-readout-for="years-readout" role="group" aria-label="Exploited flaws by year of disclosure. Tab through the years for counts, or open the table below.">
+      {% for frac in [0, 0.5, 1] %}{% set y = top + (1 - frac) * (H - top) %}
+      <line class="grid" x1="{{ left }}" x2="{{ W }}" y1="{{ y }}" y2="{{ y }}"/>
+      <text class="axis" x="{{ left - 6 }}" y="{{ y + 4 }}" text-anchor="end">{{ (peak * frac) | round | int }}</text>{% endfor %}
+      {% for y in r.years %}
+      {% set x = left + loop.index0 * colw %}
+      {% set h = y.count / peak * (H - top) %}
+      {% set text %}{{ y.year }}: {{ ui.plural(y.count, "exploited flaw", "exploited flaws") }}{% if y.year == r.this_year %} so far{% endif %}{% endset %}
+      <g class="year" tabindex="0" data-readout="{{ text }}" aria-label="{{ text }}">
+        <rect class="hit" x="{{ x + 1 }}" y="{{ top }}" width="{{ colw - 2 }}" height="{{ H - top }}"/>
+        {% if y.count %}<rect class="bar" x="{{ x + colw * 0.2 }}" y="{{ H - h }}" width="{{ colw * 0.6 }}" height="{{ h }}"/>{% endif %}
+        <text class="axis" x="{{ x + colw / 2 }}" y="{{ H + 17 }}" text-anchor="middle">{{ y.year if r.years|length <= 12 or loop.index0 % 2 == 0 or loop.last else "" }}</text>
+      </g>
+      {% endfor %}
+    </svg>
+    <p class="readout" id="years-readout" aria-live="polite">Hover or tab through a year for its count.</p>
+    <details>
+      <summary>Show as a table</summary>
+      <table><thead><tr><th scope="col">Year disclosed</th><th scope="col" class="num">Exploited flaws</th></tr></thead>
+        <tbody>{% for y in r.years %}<tr><td>{{ y.year }}</td><td class="num">{{ y.count }}</td></tr>{% endfor %}</tbody></table>
+    </details>
+  </section>
+
+  <section class="section" aria-labelledby="h-repeat">
+    <h2 id="h-repeat">Products exploited more than once</h2>
+    {% if r.repeats %}
+    <table>
+      <thead><tr><th scope="col">Product</th><th scope="col" class="num">Flaws</th><th scope="col">First listed</th><th scope="col">Latest</th></tr></thead>
+      <tbody>{% for p in r.repeats[:15] %}<tr><td>{{ p.product }}</td><td class="num">{{ p.count }}</td><td>{{ p.first }}</td><td>{{ p.latest }}</td></tr>{% endfor %}</tbody>
+    </table>
+    {% if r.repeats|length > 15 %}<p class="note">And {{ r.repeats|length - 15 }} more.</p>{% endif %}
+    {% else %}
+    <p class="empty">No product has had more than one flaw on CISA's list.</p>
+    {% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="h-latest">
+    <h2 id="h-latest">Latest on CISA's list</h2>
+    <ul class="list">
+      {% for k in r.latest %}<li><a class="title" href="/vulns/{{ k.cve_id }}">{{ k.name }}</a><span class="meta"><span class="cve">{{ k.cve_id }}</span> · added {{ k.date_added }}{% if k.ransomware %} · used by ransomware{% endif %}</span></li>{% endfor %}
+    </ul>
+  </section>
+
+  <section class="section" aria-labelledby="h-news">
+    <h2 id="h-news">In the news</h2>
+    {% if news %}
+    <ul class="list">
+      {% for s in news %}<li>{% if s.link %}<a class="title" href="{{ s.link }}" rel="noopener noreferrer">{{ s.headline }}</a>{% else %}{{ s.headline }}{% endif %}<span class="meta">{{ s.source }} · {{ s.age }}</span></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No security story in the last {{ news_days }} days named {{ r.vendor }} in its headline.</p>
+    {% endif %}
+  </section>
+
+  <p class="note">From CISA's Known Exploited Vulnerabilities catalogue. "Disclosure to CISA's list" uses NVD's publication date and leaves out the {{ launch }} launch, when CISA added hundreds of older flaws at once; CISA often lists a flaw after attacks have begun, so it's an upper limit on how fast exploitation came.</p>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  // Hover or focus a year and its count appears below, so the chart works by keyboard too.
+  const chart = document.querySelector("[data-readout-for]");
+  if (!chart) return;
+  const out = document.getElementById(chart.getAttribute("data-readout-for"));
+  const resting = out.textContent;
+  chart.querySelectorAll("[data-readout]").forEach((mark) => {
+    const show = () => { out.textContent = mark.getAttribute("data-readout"); };
+    mark.addEventListener("mouseenter", show);
+    mark.addEventListener("focus", show);
+  });
+  chart.addEventListener("mouseleave", () => { if (!chart.contains(document.activeElement)) out.textContent = resting; });
+  chart.addEventListener("focusout", (e) => { if (!chart.contains(e.relatedTarget)) out.textContent = resting; });
+})();
+</script>
+{% endblock %}

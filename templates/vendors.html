@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Vendor track record · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .v-head { margin: 28px 0 18px; }
+  .v-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .not-a-rating { margin: 16px 0 0; padding: 10px 14px; border: 1px solid var(--ink); max-width: 70ch; font-size: 15px; }
+  .not-a-rating strong { font: 700 16px var(--serif); }
+  .filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin: 24px 0 12px; font-size: 14px; color: var(--muted); }
+  .filters input { border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 8px 10px; min-height: 44px; font: 15px var(--sans); width: 240px; max-width: 100%; }
+  .stack-filter { min-height: 44px; padding: 0 14px; border: 1px solid var(--rule); background: none; font: 600 14px var(--sans); cursor: pointer; }
+  .stack-filter[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th { text-align: left; font-weight: 600; font-size: 13px; color: var(--muted); padding: 0 12px 8px 0; border-bottom: 2px solid var(--strong-rule); }
+  td { padding: 10px 12px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td a { font: 600 17px var(--serif); text-decoration: none; } td a:hover { text-decoration: underline; }
+  .mine { display: block; color: var(--blue); font: 600 13px var(--sans); }
+  .top-product { color: var(--muted); }
+  .more-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0; padding: 12px 0; color: var(--muted); font-size: 14px; }
+  .more-button { min-height: 44px; padding: 0 18px; background: none; border: 1px solid var(--ink); font: 600 15px var(--sans); cursor: pointer; }
+  .more-button:hover { background: var(--ink); color: var(--bg); }
+  tbody.collapsed:not(.filtered) tr.extra { display: none; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); }
+  .sources { margin-top: 32px; font-size: 13px; color: var(--muted); max-width: 80ch; }
+  @media (max-width: 640px) { .opt { display: none; } }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="v-head">
+    <h1>Vendor track record</h1>
+    <p class="standfirst">How often each vendor's flaws have ended up on {{ ui.term("kev", "CISA's exploited list") }}, which products keep coming back, and how fast. Pick a vendor for its full record.</p>
+    <p class="not-a-rating"><strong>A track record, not a security rating.</strong> Vendors with more products and more customers attract more attackers and more scrutiny, so a bigger count isn't a worse grade. Use it to see patterns, like a product that keeps getting exploited.</p>
+  </div>
+
+{% if error %}
+  <p class="empty">SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+{% elif not data.vendors %}
+  <p class="empty">CISA's list hasn't been downloaded yet. The collector fetches it once a day.</p>
+{% else %}
+  <div class="filters" id="filters" hidden>
+    <label class="sr-only" for="vendor-search">Find a vendor or product</label>
+    <input id="vendor-search" type="search" placeholder="Find a vendor" autocomplete="off">
+    <button type="button" class="stack-filter" id="vendor-stack" aria-pressed="false" hidden>Vendors in my stack</button>
+    <span id="vendor-count" aria-live="polite"></span>
+  </div>
+  <table>
+    <caption class="sr-only">Vendors by number of flaws on CISA's exploited list</caption>
+    <thead><tr><th scope="col">Vendor</th><th scope="col" class="num">Exploited flaws</th><th scope="col" class="num">Added this year</th><th scope="col" class="num opt">Used by ransomware</th><th scope="col" class="opt">Most repeated product</th></tr></thead>
+    <tbody id="vendor-rows">
+      {% for v in data.vendors %}
+      <tr class="{{ 'extra' if loop.index > 30 }}" data-text="{{ (v.vendor ~ ' ' ~ v.top_product) | lower }}" data-products="{{ v.stack | join(' ') }}">
+        <td><a href="/vendors/{{ v.slug }}">{{ v.vendor }}</a><span class="mine" hidden>In your stack</span></td>
+        <td class="num">{{ v.total }}</td>
+        <td class="num">{{ v.added_this_year }}</td>
+        <td class="num opt">{{ v.ransomware }}</td>
+        <td class="opt top-product">{% if v.top_product_count > 1 %}{{ v.top_product }} ({{ v.top_product_count }}){% else %}None repeated{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="empty" id="vendor-none" hidden>No vendor matches.</p>
+  {% if data.vendors|length > 30 %}
+  <p class="more-bar" id="more-bar" hidden>
+    <span id="more-note">Showing the 30 with the most of {{ data.vendors|length }}.</span>
+    <button type="button" class="more-button" id="more-button" aria-controls="vendor-rows" aria-expanded="false">Show all {{ data.vendors|length }}</button>
+  </p>
+  {% endif %}
+{% endif %}
+  <p class="sources">From <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" rel="noopener noreferrer">CISA's Known Exploited Vulnerabilities catalogue</a>, every flaw since it began in November 2021. Vendors are named as CISA names them, so a company it bought (Pulse Secure, now Ivanti) can appear separately.</p>
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const body = document.getElementById("vendor-rows");
+  if (!body) return;
+  const rows = Array.from(body.querySelectorAll("tr"));
+  const search = document.getElementById("vendor-search");
+  const count = document.getElementById("vendor-count");
+  const none = document.getElementById("vendor-none");
+  document.getElementById("filters").hidden = false;
+
+  const bar = document.getElementById("more-bar");
+  if (bar) {
+    const button = document.getElementById("more-button"), note = document.getElementById("more-note");
+    body.classList.add("collapsed");
+    bar.hidden = false;
+    button.addEventListener("click", () => {
+      const opening = body.classList.contains("collapsed");
+      body.classList.toggle("collapsed", !opening);
+      button.setAttribute("aria-expanded", String(opening));
+      button.textContent = opening ? "Show fewer" : "Show all " + rows.length;
+      note.textContent = opening ? "Showing all " + rows.length + "." : "Showing the 30 with the most of " + rows.length + ".";
+    });
+  }
+
+  let mine = new Set();
+  try { mine = new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]")); } catch (e) { /* none */ }
+  let stackOn = false;
+  const inStack = (tr) => tr.dataset.products.split(" ").some((p) => p && mine.has(p));
+  if (mine.size) {
+    rows.filter(inStack).forEach((tr) => { tr.querySelector(".mine").hidden = false; });
+    const toggle = document.getElementById("vendor-stack");
+    toggle.hidden = false;
+    toggle.addEventListener("click", () => {
+      stackOn = !stackOn;
+      toggle.setAttribute("aria-pressed", String(stackOn));
+      apply();
+    });
+  }
+
+  function apply() {
+    const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let shown = 0;
+    rows.forEach((tr) => {
+      const match = words.every((w) => tr.dataset.text.includes(w)) && (!stackOn || inStack(tr));
+      tr.hidden = !match;
+      if (match) shown += 1;
+    });
+    const filtering = words.length || stackOn;
+    body.classList.toggle("filtered", !!filtering);
+    if (bar) bar.hidden = !!filtering;
+    none.hidden = shown > 0;
+    count.textContent = filtering ? "Showing " + shown + " of " + rows.length : "";
+  }
+  search.addEventListener("input", apply);
+})();
+</script>
+{% endblock %}

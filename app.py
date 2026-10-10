@@ -480,6 +480,7 @@ def vulnerability(cve_id):
     kev = dict(kev) if kev else None
     if kev:
         kev["due"] = vulns.due_words(kev["due_date"])
+        kev["vendor_slug"] = vulns.vendor_slug(kev["vendor"])
         kev["notes_links"] = [u for u in (n.strip() for n in (kev["notes"] or "").split(";")) if safe_link(u)]
     # A heading in words: CISA's name for the flaw, or Microsoft's (one advisory per CVE, so its
     # title names this flaw; other outlets' headlines can cover several and aren't used).
@@ -607,6 +608,53 @@ def patch_first():
                                        "epss": vulns.POINTS_EPSS, "cvss": vulns.POINTS_CVSS_MAX,
                                        "article": vulns.POINTS_PER_ARTICLE, "news": vulns.POINTS_NEWS_MAX,
                                        "due": vulns.POINTS_DUE_SOON, "due_days": vulns.DUE_SOON_DAYS})
+
+
+VENDOR_NEWS_DAYS = 14
+TIMING_MIN_FLAWS = 5     # below this many dated flaws, a median would mislead
+
+
+_VENDOR_CACHE = {}
+
+
+@app.route("/vendors")
+def vendors():
+    def build():
+        # Only changes when CISA's list does, so it's kept until the collector runs again.
+        stamp = collected_time()
+        if _VENDOR_CACHE.get("stamp") != stamp:
+            conn = connect()
+            try:
+                rows = vulns.vendor_index(conn)
+            finally:
+                conn.close()
+            for v in rows:
+                v["stack"] = sorted(set().union(*(stack_products(v["vendor"], p, "") for p in v["product_names"])))
+            _VENDOR_CACHE.update(stamp=stamp, rows=rows)
+        return {"vendors": _VENDOR_CACHE["rows"]}
+
+    return page_or_unavailable("vendors.html", build, active="vendors", stack_names=stack.NAMES)
+
+
+@app.route("/vendors/<slug>")
+def vendor(slug):
+    if slug != vulns.vendor_slug(slug):
+        canonical = vulns.vendor_slug(slug)
+        if not canonical:
+            abort(404)
+        return redirect(url_for("vendor", slug=canonical), code=301)
+    conn = connect()
+    try:
+        record = vulns.vendor_detail(conn, slug)
+    finally:
+        conn.close()
+    if record is None:
+        abort(404)
+    pattern = re.compile(rf"\b{re.escape(record['vendor'])}\b", re.I)
+    news = [s for s in load_items(VENDOR_NEWS_DAYS)
+            if s["severity"] in briefing.SECURITY and pattern.search(s["headline"] or "")][:8]
+    return render_template("vendor.html", active="vendors", r=record, news=news, news_days=VENDOR_NEWS_DAYS,
+                           timing_min=TIMING_MIN_FLAWS, soon_days=vulns.LISTED_SOON_DAYS, launch=vulns.KEV_LAUNCH_DAY)
 
 
 SEVERITY_LABEL = dict(SEVERITIES)

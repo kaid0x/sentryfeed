@@ -64,6 +64,17 @@ collect.py ──> stocks.py   breached US-listed companies: SEC filings and sha
 
 Being exploited counts most, because a flaw already used in attacks matters more than a worse one nobody is using. Each entry also says whether NVD's record links to a patch or a vendor advisory (the collector fills in NVD details for recent news CVEs and new CISA additions). The top 25 are kept, 10 shown at first. Flaws about products in My stack are marked, and "Your stack first" moves them to the top, all in the browser. The list has its own feed, `/feeds/patch.xml`, with one item per CVE so a flaw moving up or down isn't repeated.
 
+## Vendor track record
+
+`/vendors` lists every vendor on CISA's exploited list since it began in November 2021, with how many of its flaws are on it, how many were added this year, how many CISA links to ransomware, and its most repeated product; search it, or show only vendors in My stack (matched in the browser). Each vendor has a page (`/vendors/fortinet`) with:
+
+- **Exploited flaws by the year they were disclosed** (the year in the CVE ID), as a chart with keyboard readouts and a table. Counting by the year CISA added them would mislead: it began with 287 older flaws on one day and kept adding older ones in bulk through 2022.
+- **Products exploited more than once**, with when each was first and last listed.
+- **Disclosure to CISA's list:** the median days from NVD's publication date to CISA listing the flaw, and how many were listed within 30 days. It leaves out the launch-day batch, and is shown only once at least 5 of the vendor's flaws have a publication date; the collector fills these in from NVD, about 100 a run. CISA often lists a flaw after attacks have begun, so it's an upper limit.
+- **The latest additions** (linked to their CVE pages) and **this fortnight's news** naming the vendor.
+
+**It's labelled a track record, not a security rating**, on both pages, and there's no single score: vendors with more products and customers draw more attackers and scrutiny, so a bigger count isn't a worse grade. Vendors are named as CISA names them, so Pulse Secure and Ivanti appear separately.
+
 ## Weekly digest
 
 `/digest` opens the latest finished week; each week has its own page, like `/digest/2026-W41`, with links to the weeks before and after and an archive of every week. Weeks run Monday to Sunday, Dubai time. Each one has:

@@ -95,7 +95,7 @@ FOOTER = [
 NAV = [
     ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
                ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
-               ("Patch this first", "/patch", "patch"),
+               ("Patch this first", "/patch", "patch"), ("Vendor track record", "/vendors", "vendors"),
                ("Ransomware stats", None, None), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", None, None), ("Domain check", None, None)]),
