@@ -89,18 +89,23 @@ def ago(iso, now):
     return f"{minutes // 1440}d ago"
 
 
-def load_items_ungrouped(days):
-    """Every item in the window, one per article."""
+def load_items_ungrouped(days=None, start=None, end=None):
+    """Every item in the window, one per article: the last `days` days, or from `start`
+    up to (not including) `end`, both timezone-aware datetimes."""
     now = datetime.now(timezone.utc)
-    cutoff = (now - timedelta(days=days)).isoformat()
+    columns = """SELECT id, category, source, title, summary, link, published,
+                        cves, cvss, kev, severity, severity_reason FROM items"""
     conn = connect()
-    rows = conn.execute(
-        """SELECT id, category, source, title, summary, link, published,
-                  cves, cvss, kev, severity, severity_reason
-           FROM items
-           WHERE severity IS NOT NULL AND (published IS NULL OR published >= ?)""",
-        (cutoff,),
-    ).fetchall()
+    if start is not None:
+        rows = conn.execute(
+            columns + " WHERE severity IS NOT NULL AND published >= ? AND published < ?",
+            (start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            columns + " WHERE severity IS NOT NULL AND (published IS NULL OR published >= ?)",
+            ((now - timedelta(days=days)).isoformat(),),
+        ).fetchall()
     conn.close()
 
     items = []
@@ -144,11 +149,28 @@ def load_items(days):
     return briefing.prepare(stories)
 
 
-def _group_items(days):
+def load_week(start, end):
+    """One entry per story published in [start, end), e.g. a digest's week. Cached like load_items."""
+    key = ("week", start.isoformat())
+    stamp = collected_time()
+    cached = _STORY_CACHE.get(key)
+    if cached is None or cached[0] != stamp:
+        cached = (stamp, _group_items(start=start, end=end))
+        _STORY_CACHE[key] = cached
+    now = datetime.now(timezone.utc)
+    stories = copy.deepcopy(cached[1])
+    for story in stories:
+        story["age"] = ago(story["published"], now)
+        for other in story["also"]:
+            other["age"] = ago(other["published"], now)
+    return briefing.prepare(stories)
+
+
+def _group_items(days=None, start=None, end=None):
     """One entry per story. When several outlets covered it, the highest-ranked
     article leads (so the story takes its colour), and the rest are listed under
     "also" with their CVEs and countries added to the lead's."""
-    stories = group_stories(load_items_ungrouped(days), RANK)
+    stories = group_stories(load_items_ungrouped(days, start, end), RANK)
     for story in stories:
         others = story["also"]
         members = [story, *others]
@@ -464,6 +486,94 @@ def vulnerability(cve_id):
     return render_template("vuln.html", active="vulns", cve_id=cve_id, kev=kev, details=details, score=score, title=title,
                            note=note, stories=stories, epss_text=vulns.epss_words(score["score"]) if score else None,
                            percentile_text=vulns.percentile_words(score["percentile"]) if score else None)
+
+
+def first_story_time():
+    """When SentryFeed's first story was published, or None with no stories yet."""
+    conn = connect()
+    try:
+        first = conn.execute("SELECT MIN(published) FROM items WHERE severity IS NOT NULL").fetchone()[0]
+    finally:
+        conn.close()
+    return datetime.fromisoformat(first) if first else None
+
+
+def first_week_start():
+    """Monday of the week SentryFeed's first story was published, or None with no stories yet."""
+    first = first_story_time()
+    return briefing.week_start(briefing.week_id(first)) if first else None
+
+
+@app.route("/digest")
+def digest_latest():
+    """The latest finished week, or this week so far if SentryFeed is younger than that."""
+    now = datetime.now(timezone.utc)
+    first = first_week_start()
+    latest = briefing.week_start(briefing.week_id(now - timedelta(days=7)))
+    if first is None or latest < first:
+        latest = briefing.week_start(briefing.week_id(now))
+    return redirect(url_for("digest_week", week=briefing.week_id(latest)), code=302)
+
+
+@app.route("/digest/<week>")
+def digest_week(week):
+    start = briefing.week_start(week)
+    if start is None:
+        abort(404)
+    canonical = briefing.week_id(start)
+    if week != canonical:
+        return redirect(url_for("digest_week", week=canonical), code=301)
+    now = datetime.now(timezone.utc)
+    current = briefing.week_start(briefing.week_id(now))
+    first = first_week_start()
+    if first is None or start < first or start > current:
+        abort(404)
+    end, prev_start = start + timedelta(days=7), start - timedelta(days=7)
+    # Only compare two whole weeks: not the first week (collection started part-way through),
+    # and not this week, which isn't over yet.
+    first_story = first_story_time()
+    compare = prev_start >= first_story and start != current
+
+    def week_incidents(incidents, a, b):
+        return [i for i in incidents if a.date().isoformat() <= i["date"] < b.date().isoformat()]
+
+    def build():
+        stories = load_week(start, end)
+        attach_stock_summaries(stories)
+        incidents = load_incidents()
+        for inc in incidents:
+            for story in inc["stories"]:
+                story["link"] = safe_link(story["link"])
+        conn = connect()
+        try:
+            new_kev = vulns.kev_between(conn, start.date(), (end - timedelta(days=1)).date())
+            prev = None
+            if compare:
+                prev_kev = vulns.kev_between(conn, prev_start.date(), (start - timedelta(days=1)).date())
+                prev = (load_week(prev_start, start), len(prev_kev), len(week_incidents(incidents, prev_start, start)))
+            # Events listed for the week after: from the week's end, or from now if it hasn't ended.
+            upcoming = events.upcoming(conn, within=timedelta(days=7), now=max(end, now))
+        finally:
+            conn.close()
+        for e in upcoming:
+            e["url"] = safe_link(e["url"])
+        for row in new_kev:
+            row["epss_text"] = vulns.epss_words(row["epss"])
+        return briefing.digest(stories, new_kev, week_incidents(incidents, start, end), upcoming, prev)
+
+    weeks = []
+    w = current
+    while w >= first:
+        weeks.append((briefing.week_id(w), briefing.week_label(w), w == current))
+        w -= timedelta(days=7)
+    return page_or_unavailable(
+        "digest.html", build, active="digest", week=canonical, label=briefing.week_label(start),
+        number=int(canonical[-2:]), in_progress=start == current, first_partial=start < first_story,
+        compared_with_partial=not compare and prev_start >= first and start != current,
+        prev_week=briefing.week_id(prev_start) if prev_start >= first else None,
+        next_week=briefing.week_id(end) if end <= current else None, weeks=weeks,
+        world_lite=briefing.WORLD_LITE, has_sec_contact=bool(stocks.sec_contact()),
+    )
 
 
 def visitor_address():

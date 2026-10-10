@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}Weekly digest, week {{ number }} · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .d-head { margin: 28px 0 18px; }
+  .d-kicker { font: 700 15px var(--serif); color: var(--muted); margin: 0 0 4px; }
+  .d-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .note { font-size: 14px; color: var(--muted); margin: 8px 0 0; }
+  .weeknav { display: flex; justify-content: space-between; gap: 12px; margin: 14px 0 0; }
+  .weeknav a { display: inline-block; padding: 10px 0; font-weight: 600; }
+  .numbers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0 32px; margin: 20px 0 0; border-top: 2px solid var(--strong-rule); }
+  .numbers div { padding: 12px 0; border-bottom: 1px solid var(--rule); }
+  .numbers dd { margin: 0; }
+  .numbers .n { font: 700 34px/1 var(--serif); }
+  .numbers .label { display: block; margin-top: 4px; }
+  .numbers .cmp { display: block; font-size: 13px; color: var(--muted); }
+  .section { margin-top: 48px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .section h2 { font: 700 26px/1.2 var(--serif); margin: 0 0 14px; }
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px solid var(--rule); }
+  .kicker { margin: 0 0 4px; font-size: 14px; color: var(--muted); }
+  .kicker strong { color: var(--sev); font: 700 15px var(--serif); }
+  .list h3 { font: 700 19px/1.25 var(--serif); margin: 0 0 4px; }
+  .list h3 a { text-decoration: none; } .list h3 a:hover { text-decoration: underline; }
+  .meta { font-size: 14px; color: var(--muted); margin: 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+  .bmap { display: block; width: 100%; height: auto; background: var(--raised); }
+  .bmap .country { fill: var(--land); stroke: var(--land-edge); stroke-width: 0.75px; vector-effect: non-scaling-stroke; }
+  .bmap .country.dot { display: none; }
+  .empty { font: italic 18px/1.5 var(--serif); color: var(--muted); margin: 0; }
+  .weeks { list-style: none; margin: 0; padding: 0; columns: 2; }
+  .weeks a { display: inline-block; padding: 8px 0; }
+  @media (max-width: 760px) { .numbers { grid-template-columns: 1fr 1fr; } .two { grid-template-columns: 1fr; } .weeks { columns: 1; } }
+</style>
+{% if data %}{{ ui.map_fills(".bmap", data.map) }}{% endif %}
+{% endblock %}
+
+{% block body %}
+<main class="wrap">
+  <div class="d-head">
+    <p class="d-kicker">Weekly digest · week {{ number }}</p>
+    <h1>{{ label }}</h1>
+    {% if data %}{% set c = data.counts %}
+    <p class="standfirst">{{ ui.plural(c.major, "Major story", "Major stories") }}, {{ ui.plural(c.new_kev, "flaw", "flaws") }} added to {{ ui.term("kev", "CISA's exploited list") }} and {{ ui.plural(c.companies, "breached listed company", "breached listed companies") }}{% if data.top_countries|length == 1 %}. Busiest country: {{ data.top_countries[0] }}{% elif data.top_countries %}. Busiest countries: {{ data.top_countries[:-1] | join(", ") }} and {{ data.top_countries[-1] }}{% endif %}.</p>
+    {% endif %}
+    {% if in_progress %}<p class="note">This week isn't over yet: the digest fills in every time the collector runs, and the comparisons with the week before appear once it ends.</p>{% endif %}
+    {% if first_partial %}<p class="note">SentryFeed started collecting part-way through this week, so it's incomplete and has nothing to compare with.</p>{% endif %}
+    {% if compared_with_partial %}<p class="note">No comparisons this week: SentryFeed only collected part of the week before.</p>{% endif %}
+    <nav class="weeknav" aria-label="Other weeks">
+      <span>{% if prev_week %}<a href="/digest/{{ prev_week }}">Week before</a>{% endif %}</span>
+      <span>{% if next_week %}<a href="/digest/{{ next_week }}">Week after</a>{% endif %}</span>
+    </nav>
+  </div>
+
+{% if error %}
+  <p class="empty">SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+{% else %}
+  <section aria-label="The week in numbers"><dl class="numbers">
+    {% for n in data.numbers %}<div><dt class="sr-only">{{ n.label }}</dt><dd><span class="n">{{ n.n }}</span><span class="label">{{ n.label }}</span>{% if n.compared %}<span class="cmp">{{ n.compared }}</span>{% endif %}</dd></div>{% endfor %}
+  </dl></section>
+
+  <section class="section" aria-labelledby="h-top">
+    <h2 id="h-top">The biggest stories</h2>
+    {% if data.top %}
+    <ol class="list">{% for s in data.top %}
+      <li class="sev-{{ s.severity }}"><p class="kicker"><strong>{{ ui.sev_word(s.severity) }}.</strong> {{ s.reason | glossed }}</p>
+        <h3>{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.headline }}</a>{% else %}{{ s.headline }}{% endif %}</h3>
+        <p class="meta">{{ s.source }}{% if s.also %} and {{ s.also|length }} more{% endif %}{% if s.published %} · {{ s.published[:10] }}{% endif %}</p></li>
+    {% endfor %}</ol>
+    {% else %}<p class="empty">No security stories this week.</p>{% endif %}
+  </section>
+
+  <section class="section" aria-labelledby="h-kev">
+    <h2 id="h-kev">New on CISA's exploited list</h2>
+    {% if data.new_kev %}
+    <ul class="list">{% for k in data.new_kev %}
+      <li><h3><a href="/vulns/{{ k.cve_id }}">{{ k.name }}</a></h3><p class="meta">{{ k.cve_id }} · added {{ k.date_added }} · chance of use {{ k.epss_text or "not scored" }}{% if k.ransomware %} · used by ransomware{% endif %}</p></li>
+    {% endfor %}</ul>
+    {% else %}<p class="empty">CISA added nothing this week.</p>{% endif %}
+  </section>
+
+  <section class="section two" aria-label="Where it happened, and markets">
+    <div>
+      <h2>Where it happened</h2>
+      {% if data.busiest %}
+      <a href="/map?days=7" aria-label="Open the map"><svg class="bmap" viewBox="0 -2 960 422" aria-hidden="true" focusable="false">{{ world_lite }}</svg></a>
+      <ul class="list">{% for co in data.busiest %}<li>{{ co.name }}: {{ ui.plural(co.count, "story", "stories") }}</li>{% endfor %}</ul>
+      {% else %}<p class="empty">No incident this week named a country.</p>{% endif %}
+    </div>
+    <div>
+      <h2>Markets</h2>
+      {% if data.markets %}
+      <ul class="list">{% for m in data.markets %}<li><h3>{{ m.company }} <span class="meta">{{ m.display_ticker }}</span></h3><p class="meta">{% if m.no_prices %}No free price data{% elif m.change is none %}Waiting for prices{% else %}Shares {{ "%+.1f%%" | format(m.change * 100) }}, market {{ "%+.1f%%" | format(m.market_change * 100) }}{% endif %}</p></li>{% endfor %}</ul>
+      {% else %}<p class="empty">No breach story named a listed company this week.{% if not has_sec_contact %} US companies aren't matched on this server yet.{% endif %}</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="section two" aria-label="The Gulf, and the week after">
+    <div>
+      <h2>In the Gulf</h2>
+      {% if data.gulf %}<ul class="list">{% for s in data.gulf %}<li><h3>{% if s.link %}<a href="{{ s.link }}" rel="noopener noreferrer">{{ s.headline }}</a>{% else %}{{ s.headline }}{% endif %}</h3><p class="meta">{{ s.source }}</p></li>{% endfor %}</ul>
+      {% else %}<p class="empty">No Gulf stories this week.</p>{% endif %}
+    </div>
+    <div>
+      <h2>Coming up</h2>
+      {% if data.upcoming %}<ul class="list">{% for e in data.upcoming %}<li><h3>{% if e.url %}<a href="{{ e.url }}" rel="noopener noreferrer">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</h3><p class="meta">{{ e.starts_display }} · {{ e.where }}</p></li>{% endfor %}</ul>
+      {% else %}<p class="empty">No events listed for the week after. <a href="/events/submit">Submit one</a>.</p>{% endif %}
+    </div>
+  </section>
+{% endif %}
+
+  <section class="section" aria-labelledby="h-weeks">
+    <h2 id="h-weeks">Every week</h2>
+    <ul class="weeks">{% for wid, wlabel, now in weeks %}<li><a href="/digest/{{ wid }}"{% if wid == week %} aria-current="page"{% endif %}>{{ wlabel }}{% if now %} (so far){% endif %}</a></li>{% endfor %}</ul>
+  </section>
+</main>
+{% endblock %}

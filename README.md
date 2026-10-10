@@ -49,6 +49,16 @@ collect.py ──> stocks.py   breached US-listed companies: SEC filings and sha
 - **Storage:** one SQLite file. Links are unique, so re-running the collector never creates duplicates. Only the last 14 days are kept per run, and each source is capped at 100 items (MSRC publishes its whole history in one feed).
 - **CVE lookups:** each CVE is looked up in the NVD API once and cached. Unscored CVEs are rechecked after 24 hours, since NVD often scores new CVEs a few days after publication.
 
+## Weekly digest
+
+`/digest` opens the latest finished week; each week has its own page, like `/digest/2026-W41`, with links to the weeks before and after and an archive of every week. Weeks run Monday to Sunday, Dubai time. Each one has:
+
+- **The week in one sentence:** Major stories, flaws added to CISA's list, breached listed companies and the busiest country (or countries, if they tie).
+- **The week in numbers**, compared with the week before: Major and Medium stories, stories about flaws on CISA's list, flaws CISA added, countries named in incidents, and breached listed companies.
+- **The biggest stories** (eight, with Microsoft's advisories grouped into one), **new on CISA's list**, **where it happened** (map and busiest countries), **markets**, **the Gulf** and **events listed for the week after**.
+
+Comparisons only appear between two complete weeks: not for the week in progress, and not against SentryFeed's first week, which started part-way through. The page says when that's why they're missing. Past weeks are read from the stories already stored (nothing is deleted), so the archive goes back to the first collector run.
+
 ## Vulnerabilities
 
 `/vulns` answers three questions about a flaw, each from its own source:

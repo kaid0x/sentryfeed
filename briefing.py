@@ -7,7 +7,7 @@ its own wording, which stays exact for debugging the scoring rules.
 import json
 import re
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -94,7 +94,7 @@ FOOTER = [
 NAV = [
     ("Intel", [("Feed", "/feed", "feed"), ("Map", "/map", "map"), ("Stocks", "/stocks", "stocks"),
                ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
-               ("Ransomware stats", None, None), ("Weekly digest", None, None), ("Gulf pulse", None, None)]),
+               ("Ransomware stats", None, None), ("Weekly digest", "/digest", "digest"), ("Gulf pulse", None, None)]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", None, None), ("Domain check", None, None)]),
     ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
@@ -218,7 +218,7 @@ def plain_reason(reason):
     return reason[0].upper() + reason[1:]
 
 
-def group_advisories(stories):
+def group_advisories(stories, span="in the last 24 hours"):
     """Microsoft publishes one advisory per flaw, often several a day. On the front page they
     become one item, so three CVE titles don't push the day's real news off the top."""
     ms = [s for s in stories if s["source"] == "Microsoft MSRC"]
@@ -229,8 +229,8 @@ def group_advisories(stories):
     lead = ms[0]
     group = {
         **lead,
-        "title": f"Microsoft: {len(ms)} security advisories in the last 24 hours",
-        "headline": f"Microsoft: {len(ms)} security advisories in the last 24 hours",
+        "title": f"Microsoft: {len(ms)} security advisories {span}",
+        "headline": f"Microsoft: {len(ms)} security advisories {span}",
         "link": "https://msrc.microsoft.com/update-guide",
         "summary": "",
         "also": [],
@@ -365,4 +365,105 @@ def map_page(stories):
         "unplaced": by_importance([s for s in security if not (s["where"] or s["blamed"])])[:6],
         "unplaced_count": len(security) - len(placed),
         "map": country_map(placed),
+    }
+
+
+# ---------- Weekly digest ----------
+
+# Weeks run Monday to Sunday, in Dubai time, named the ISO way: 2026-W41.
+WEEK_RE = re.compile(r"^(\d{4})-W(\d{2})$", re.I)
+DIGEST_STORIES = 8
+
+
+def week_id(when):
+    d = when.astimezone(DUBAI).date() if isinstance(when, datetime) else when
+    year, week, _ = d.isocalendar()
+    return f"{year}-W{week:02d}"
+
+
+def week_start(wid):
+    """Midnight on the Monday of "2026-W41", Dubai time, or None if it isn't a real week."""
+    m = WEEK_RE.match(wid or "")
+    if not m:
+        return None
+    try:
+        monday = date.fromisocalendar(int(m.group(1)), int(m.group(2)), 1)
+    except ValueError:
+        return None
+    return datetime.combine(monday, time(0), DUBAI)
+
+
+def week_label(start):
+    """ "6 to 12 October 2026", "29 September to 5 October 2026", "29 December 2025 to 4 January 2026"."""
+    first, last = start.date(), (start + timedelta(days=6)).date()
+    if first.year != last.year:
+        return f"{first.day} {first:%B %Y} to {last.day} {last:%B %Y}"
+    if first.month != last.month:
+        return f"{first.day} {first:%B} to {last.day} {last:%B %Y}"
+    return f"{first.day} to {last.day} {last:%B %Y}"
+
+
+def compared(now, before):
+    """ "3 more than the week before", "2 fewer", "same as the week before", or "" with nothing to compare."""
+    if before is None:
+        return ""
+    if now == before:
+        return "same as the week before"
+    diff = abs(now - before)
+    return f"{diff} {'more' if now > before else 'fewer'} than the week before"
+
+
+def _week_numbers(stories, new_kev, companies):
+    security = [s for s in stories if s["severity"] in SECURITY]
+    placed = [s for s in security if s["where"] or s["blamed"]]
+    return {
+        "major": sum(1 for s in stories if s["severity"] == "red"),
+        "medium": sum(1 for s in stories if s["severity"] == "orange"),
+        "exploited": sum(1 for s in security if s["kev"]),
+        "new_kev": new_kev,
+        "countries": len(country_map(placed)["countries"]),
+        "companies": companies,
+    }
+
+
+NUMBER_LABELS = [
+    ("major", "Major story", "Major stories"),
+    ("medium", "Medium story", "Medium stories"),
+    ("exploited", "story about a flaw on CISA's list", "stories about flaws on CISA's list"),
+    ("new_kev", "flaw added to CISA's list", "flaws added to CISA's list"),
+    ("countries", "country named in incidents", "countries named in incidents"),
+    ("companies", "breached listed company", "breached listed companies"),
+]
+
+
+def digest(stories, new_kev, incidents, upcoming, prev=None):
+    """One week's digest. stories: the week's stories, prepared, with stock summaries; new_kev: CISA
+    additions that week; incidents: listed companies named that week; prev: the week before's
+    (stories, new_kev count, incidents count), or None if there's nothing to compare with."""
+    security = [s for s in stories if s["severity"] in SECURITY]
+    placed = [s for s in security if s["where"] or s["blamed"]]
+    numbers = _week_numbers(stories, len(new_kev), len(incidents))
+    before = _week_numbers(prev[0], prev[1], prev[2]) if prev else {}
+    gulf, gulf_dropped = gulf_split([s for s in stories if s["severity"] != "blue" and
+                                     (s.get("category") == "regional" or GCC & set(s["where"] + s["blamed"]))])
+    geo = country_map(placed)
+    for inc in incidents:
+        inc["story"] = inc["stories"][-1]
+    return {
+        "numbers": [{"key": key, "n": numbers[key], "label": one if numbers[key] == 1 else many,
+                     "compared": compared(numbers[key], before.get(key))} for key, one, many in NUMBER_LABELS],
+        "counts": numbers,
+        "top": by_importance(group_advisories(security, "this week"))[:DIGEST_STORIES],
+        "security_total": len(security),
+        "new_kev": new_kev,
+        "map": geo,
+        "busiest": geo["countries"][:5],
+        # Every country tied for the most stories, so a tie isn't reported as one winner.
+        "top_countries": [c["name"] for c in geo["countries"] if c["count"] == geo["countries"][0]["count"]][:3]
+                         if geo["countries"] else [],
+        "placed": len(placed),
+        "markets": incidents,
+        "gulf": by_importance(gulf)[:5],
+        "gulf_dropped": gulf_dropped,
+        "upcoming": upcoming,
     }

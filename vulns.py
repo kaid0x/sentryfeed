@@ -157,6 +157,14 @@ def recent_kev(conn, days=30):
            WHERE k.date_added >= ? ORDER BY k.date_added DESC, k.cve_id""", (since,))]
 
 
+def kev_between(conn, first_day, last_day):
+    """Flaws CISA added between two dates, inclusive, newest first, with EPSS."""
+    return [dict(r) for r in conn.execute(
+        """SELECT k.*, e.score AS epss FROM kev k LEFT JOIN epss e ON e.cve_id = k.cve_id
+           WHERE k.date_added BETWEEN ? AND ? ORDER BY k.date_added DESC, k.cve_id""",
+        (first_day.isoformat(), last_day.isoformat()))]
+
+
 def kev_total(conn):
     return conn.execute("SELECT COUNT(*) FROM kev").fetchone()[0]
 
