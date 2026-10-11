@@ -75,7 +75,7 @@ def _grouped(key, **window):
     try:
         stories = grouping.saved(conn, key)
         if stories is None:
-            if "days" in window:
+            if key.startswith("days:"):
                 app.logger.warning("No saved grouping for the %s-day window, so grouping it now",
                                    window["days"])
             stories = grouping.group(conn, **window)
@@ -84,14 +84,16 @@ def _grouped(key, **window):
     return stories
 
 
-def load_items(days):
+def load_items(days, gulf_only=False):
     """One entry per story, ready for the pages (see grouping.group). Each call gets its
-    own copy, with ages worked out afresh and anything older than the window dropped."""
+    own copy, with ages worked out afresh and anything older than the window dropped.
+    With gulf_only, only stories from Gulf outlets or naming a GCC country (for /gulf)."""
     stamp = collected_time()
-    cached = _STORY_CACHE.get(days)
+    key = grouping.GULF_KEY if gulf_only else grouping.days_key(days)
+    cached = _STORY_CACHE.get(key)
     if cached is None or cached[0] != stamp:
-        cached = (stamp, _grouped(grouping.days_key(days), days=days))
-        _STORY_CACHE[days] = cached
+        cached = (stamp, _grouped(key, days=days, gulf_only=gulf_only))
+        _STORY_CACHE[key] = cached
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
     stories = copy.deepcopy([s for s in cached[1] if not s["published"] or s["published"] >= cutoff])
@@ -724,7 +726,7 @@ def gulf_pulse():
 
     def build():
         days = grouping.gulf_days(first, datetime.now(timezone.utc))
-        news = briefing.gulf_pulse(load_items(days))
+        news = briefing.gulf_pulse(load_items(days, gulf_only=True))
         for s in news["latest"]:
             s["link"] = safe_link(s["link"])
         conn = connect()

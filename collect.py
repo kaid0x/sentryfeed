@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from db import connect, count_by_category, cve_stats, mark_collected, save_items
 from enrich import enrich
 from fetch import fetch_all
-from grouping import save_all as save_story_groups
+from grouping import save_all as save_story_groups, tag_articles
 from score import score_all
 from stocks import update as update_stocks
 from ransomware import update as update_ransomware
@@ -36,6 +36,12 @@ def main():
     new = save_items(conn, recent)
     print(f"Fetched {len(fetched)} items, kept {len(recent)} from the last {MAX_AGE_DAYS} days.")
     print(f"{new} new, {len(recent) - new} already stored.")
+
+    # Countries and products, once per article. If it fails, grouping works them out itself.
+    try:
+        print(f"Tagged {tag_articles(conn)} articles with countries and products")
+    except Exception as e:
+        print(f"Tagging: failed ({e.__class__.__name__}: {e})")
 
     # CISA's exploited list and EPSS scores, once a day. Before enrich, so a newly listed
     # flaw marks its stories as exploited in this same run. Never stops the rest of the run.

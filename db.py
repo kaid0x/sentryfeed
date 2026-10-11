@@ -18,7 +18,11 @@ CREATE TABLE IF NOT EXISTS items (
     cvss        REAL,              -- highest score among the item's CVEs
     kev         INTEGER NOT NULL DEFAULT 0,  -- 1 if any of its CVEs is in CISA's exploited list
     severity    TEXT,              -- red / orange / yellow / green / blue
-    severity_reason TEXT           -- why it got that colour, shown on the dashboard
+    severity_reason TEXT,          -- why it got that colour, shown on the dashboard
+    where_cc    TEXT,              -- countries it happened in (geo.py), comma-separated; NULL = not tagged yet
+    blamed_cc   TEXT,              -- countries blamed for it (geo.py)
+    products    TEXT,              -- product ids it mentions (stack.py)
+    gulf        INTEGER            -- 1 if from a Gulf outlet or naming a GCC country, for /gulf
 );
 CREATE INDEX IF NOT EXISTS idx_items_published ON items(published);
 
@@ -149,6 +153,10 @@ ADDED_COLUMNS = {
     "items": {
         "kev": "INTEGER NOT NULL DEFAULT 0",
         "severity_reason": "TEXT",
+        "where_cc": "TEXT",
+        "blamed_cc": "TEXT",
+        "products": "TEXT",
+        "gulf": "INTEGER",
     },
     "companies": {
         "exchange": "TEXT",
@@ -163,6 +171,8 @@ def _migrate(conn):
         for name, definition in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    # After the columns exist: an older database only gets `gulf` from the loop above.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_gulf ON items(gulf, published)")
     conn.commit()
 
 
