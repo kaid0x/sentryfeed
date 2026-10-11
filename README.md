@@ -332,6 +332,12 @@ With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [tur
 
 On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from the `x-vercel-forwarded-for` header, which Vercel sets itself and visitors can't fake. Anywhere else that header could be sent by anyone, so the connection's own address is used. Either way only a keyed hash of it is stored.
 
+### Collecting with GitHub Actions
+
+`.github/workflows/collect.yml` runs the collector on GitHub's machines against the Turso database, the job the Pi's systemd timer does for its own file. Its settings are the repository's Actions secrets, named as in the table above (`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are required; it stops straight away without them rather than filling a throwaway file). It runs one at a time with a 20-minute limit, has read-only access to the repository, and uses actions pinned to commits rather than tags, since a tag can later be pointed at different code. The logs are public, as the repository is; they hold only counts and status lines, and GitHub masks every secret value in them.
+
+For now it runs only by hand (Actions tab, **Collect**, **Run workflow**); the 30-minute schedule is added once a manual run has been checked. While it runs alongside the Pi, only one of the two should have the Alpha Vantage key, since its 25 lookups a day are per key.
+
 To run it permanently:
 
 ```bash
