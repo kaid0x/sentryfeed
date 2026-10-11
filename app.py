@@ -206,8 +206,13 @@ NO_COMPRESS = {"/events/submit"}
 
 def compress(resp):
     """Gzip HTML pages and feeds. The map's shapes shrink to about a third, which matters on the Pi."""
+    if request.path in NO_COMPRESS:
+        # Vercel's CDN compresses responses itself; no-transform asks it, and any other proxy,
+        # to leave this one as it is (and no-store keeps a page with a fresh token out of caches).
+        resp.headers["Cache-Control"] = "no-store, no-transform"
+        return resp
     if (resp.mimetype in ("text/html", "application/rss+xml") and resp.status_code in (200, 400, 503) and not resp.direct_passthrough
-            and request.path not in NO_COMPRESS and "Content-Encoding" not in resp.headers
+            and "Content-Encoding" not in resp.headers
             and "gzip" in request.headers.get("Accept-Encoding", "")):
         body = resp.get_data()
         if len(body) > 1024:
