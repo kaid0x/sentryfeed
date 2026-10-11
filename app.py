@@ -199,17 +199,17 @@ def security_headers(resp):
     return compress(resp)
 
 
-# Pages that echo back what a visitor typed, next to a token. Compressing those could let an
-# attacker guess the token from response sizes (the BREACH attack), so they go uncompressed.
+# Pages that echo back what a visitor typed, next to a form token: the setup the BREACH attack
+# uses to guess a secret from response sizes, so SentryFeed doesn't compress them. (Vercel's CDN
+# compresses them anyway and has no switch for one page. That's safe here: the token is a signed
+# timestamp anyone gets by opening the form, and with no logins there's no secret to guess.)
 NO_COMPRESS = {"/events/submit"}
 
 
 def compress(resp):
     """Gzip HTML pages and feeds. The map's shapes shrink to about a third, which matters on the Pi."""
     if request.path in NO_COMPRESS:
-        # Vercel's CDN compresses responses itself; no-transform asks it, and any other proxy,
-        # to leave this one as it is (and no-store keeps a page with a fresh token out of caches).
-        resp.headers["Cache-Control"] = "no-store, no-transform"
+        resp.headers["Cache-Control"] = "no-store"     # a page with a fresh token stays out of caches
         return resp
     if (resp.mimetype in ("text/html", "application/rss+xml") and resp.status_code in (200, 400, 503) and not resp.direct_passthrough
             and "Content-Encoding" not in resp.headers
