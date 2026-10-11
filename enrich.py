@@ -7,6 +7,8 @@ from pathlib import Path
 
 import requests
 
+from db import get_meta, set_meta
+
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 KEY_FILE = Path(__file__).with_name(".nvd_api_key")
 CVE_RE = re.compile(r"CVE-\d{4}-\d{4,7}", re.IGNORECASE)
@@ -96,13 +98,21 @@ def save_lookup(conn, cve_id, found):
 
 
 def tag_items(conn):
-    """Record which CVE IDs each unchecked item mentions."""
+    """Record which CVE IDs each unchecked item mentions, in items.cves and in item_cves."""
+    if not get_meta(conn, "item_cves_filled"):
+        # item_cves arrived after many articles were tagged: index those once.
+        pairs = [(cve_id, row["id"]) for row in conn.execute("SELECT id, cves FROM items WHERE cves != ''")
+                 for cve_id in row["cves"].split(",")]
+        conn.executemany("INSERT OR IGNORE INTO item_cves (cve_id, item_id) VALUES (?, ?)", pairs)
+        set_meta(conn, "item_cves_filled", "1")      # commits the index too
     rows = conn.execute(
         "SELECT id, title, summary, link FROM items WHERE cves IS NULL"
     ).fetchall()
     for row in rows:
         ids = extract_cves(row["title"], row["summary"], row["link"])
         conn.execute("UPDATE items SET cves = ? WHERE id = ?", (",".join(ids), row["id"]))
+        conn.executemany("INSERT OR IGNORE INTO item_cves (cve_id, item_id) VALUES (?, ?)",
+                         [(cve_id, row["id"]) for cve_id in ids])
     conn.commit()
     return len(rows)
 

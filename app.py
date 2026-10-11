@@ -371,11 +371,12 @@ def vulnerabilities():
         conn = connect()
         try:
             recent = vulns.recent_kev(conn)
+            mentions = vulns.mention_counts(conn, (row["cve_id"] for row in recent))
             for row in recent:
                 row["due"] = vulns.due_words(row["due_date"])
                 row["epss_text"] = vulns.epss_words(row["epss"])
                 row["products"] = stack.match({"title": f"{row['vendor']} {row['product']}", "summary": row["name"]})
-                row["stories"] = len(vulns.stories_mentioning(conn, row["cve_id"]))
+                row["stories"] = mentions.get(row["cve_id"], 0)
             stories = [s for s in load_items(VULN_NEWS_DAYS) if s["severity"] in briefing.SECURITY]
             news = vulns.news_by_likelihood(conn, stories)
             for row in news:

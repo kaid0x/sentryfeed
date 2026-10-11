@@ -217,9 +217,20 @@ def news_by_likelihood(conn, stories, limit=15):
 
 def stories_mentioning(conn, cve_id, limit=10):
     return [dict(r) for r in conn.execute(
-        """SELECT id, source, title, link, published, severity FROM items
-           WHERE (',' || cves || ',') LIKE ? ORDER BY published DESC LIMIT ?""",
-        (f"%,{cve_id},%", limit))]
+        """SELECT items.id, source, title, link, published, severity
+           FROM item_cves JOIN items ON items.id = item_cves.item_id
+           WHERE item_cves.cve_id = ? ORDER BY published DESC LIMIT ?""",
+        (cve_id, limit))]
+
+
+def mention_counts(conn, cve_ids):
+    """{cve_id: how many articles mention it}, for CVEs mentioned at least once."""
+    cve_ids = list(cve_ids)
+    if not cve_ids:
+        return {}
+    marks = ",".join("?" * len(cve_ids))
+    return dict(conn.execute(
+        f"SELECT cve_id, COUNT(*) FROM item_cves WHERE cve_id IN ({marks}) GROUP BY cve_id", cve_ids).fetchall())
 
 
 def can_look_up(conn, visitor, now=None):

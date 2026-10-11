@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_published ON items(published);
 
+-- Which articles mention which CVE (enrich.py), so a CVE's stories are found with an index
+-- lookup instead of searching the text of every article.
+CREATE TABLE IF NOT EXISTS item_cves (
+    cve_id      TEXT NOT NULL,
+    item_id     INTEGER NOT NULL,
+    PRIMARY KEY (cve_id, item_id)
+) WITHOUT ROWID;
+
 -- One row per CVE ever looked up, so each CVE hits the NVD API once, not once per article.
 CREATE TABLE IF NOT EXISTS cve_cache (
     cve_id      TEXT PRIMARY KEY,
