@@ -327,6 +327,7 @@ The key files above are how the Pi keeps its settings. Anywhere files can't be k
 | `ALPHAVANTAGE_KEY` | `.alphavantage_key` | share prices |
 | `FLASK_SECRET_KEY` | `.flask_secret` | signing the event form; on Vercel the app refuses to start without it, since its files are read-only |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | `sentryfeed.db` | use a [Turso](https://turso.tech) database instead of the local file |
+| `GITHUB_DISPATCH_TOKEN` | (none) | on Vercel only: lets `/tasks/collect` start the collector on GitHub Actions (see [Collecting with GitHub Actions](#collecting-with-github-actions)) |
 
 With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [turso-serverless](https://pypi.org/project/turso-serverless/) (pinned to one version in `requirements.txt`), with changes in `tursodb.py` for a collector that may run on the other side of the world from the database:
 
@@ -347,7 +348,15 @@ On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from
 
 `.github/workflows/collect.yml` runs the collector on GitHub's machines against the Turso database, the job the Pi's systemd timer does for its own file. Its settings are the repository's Actions secrets, named as in the table above (`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are required; it stops straight away without them rather than filling a throwaway file). It runs one at a time with a 20-minute limit, has read-only access to the repository, and uses actions pinned to commits rather than tags, since a tag can later be pointed at different code. The logs are public, as the repository is; they hold only counts and status lines, and GitHub masks every secret value in them.
 
-It runs every 30 minutes, at :13 and :43 past the hour (UTC), away from the top of the hour when GitHub delays scheduled runs most, and by hand with **Run workflow** in the Actions tab. GitHub turns a schedule off after 60 days without any activity in a public repository; re-enabling it is one click in the Actions tab, and the site's "Updated ... ago" shows when collection has stopped. While it runs alongside the Pi, only one of the two should have the Alpha Vantage key, since its 25 lookups a day are per key.
+**How runs start.** GitHub's own schedule never fired for this repository: on 11 Oct 2026 it went hours without a single scheduled run while manual runs worked every time, and pushing a change to the workflow didn't help. That's a GitHub problem reported by many others through 2026, with no fix from GitHub, so the site starts runs itself:
+
+- An outside service ([cron-job.org](https://cron-job.org)) visits `https://sentryfeed.vercel.app/tasks/collect` every 5 minutes. The visit carries no password or token.
+- That page (`trigger.py`) reads when the collector last finished. Under 27 minutes ago, it does nothing; after that, it asks GitHub to run the workflow, so runs come about every 30 minutes. It notes when it asked and doesn't ask again for 20 minutes, while that run is going, and of two visits at the same moment only one can ask. However often anyone visits, it can't start more runs than a schedule would.
+- The GitHub token, `GITHUB_DISPATCH_TOKEN`, stays in Vercel's settings. It's a fine-grained token for this one repository with only the Actions permission: it can start, cancel, re-run or delete runs and switch workflows on or off, but can't read or change the code or the secrets.
+- The page answers `200` when all is well or a retry will sort it out, and `503` when a person needs to look: no token, a token GitHub refuses, data over 2 hours old, or no database. cron-job.org emails on failures. It also switches a job off after 25 failures in a row, which is why passing GitHub hiccups don't count as failures.
+- GitHub's schedule (:13 and :43 past the hour, UTC) stays in the workflow as a backup, in case it starts working; a scheduled run skips itself when the data is under 20 minutes old, so the two never double up. GitHub turns a schedule off after 60 days without any activity in a public repository; re-enabling it is one click in the Actions tab.
+
+Runs can also be started by hand with **Run workflow** in the Actions tab, and the site's "Updated ... ago" always shows when collection last finished. While it runs alongside the Pi, only one of the two should have the Alpha Vantage key, since its 25 lookups a day are per key.
 
 To run it permanently:
 
@@ -364,12 +373,12 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
-- Collection runs on GitHub's scheduler, which can start runs late or skip them when GitHub is busy; the masthead's "Updated ... ago" always shows when it last ran.
+- Collection depends on an outside service visiting `/tasks/collect` and on GitHub Actions accepting the run. If either stops, collection stops; the masthead's "Updated ... ago" shows it, and after 2 hours the page reports a failure, which cron-job.org emails about.
 - Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
 
-- Finish the move: a week of Vercel and the Pi side by side, then the Pi retires and the Alpha Vantage key moves to GitHub Actions; a custom domain; HTTPS-only extras (one-click copy on `/feeds`, the browser's own hashing instead of the bundled SHA-1/SHA-256 code).
+- Finish the move: the Pi retires once collection has run by itself for a day, and the Alpha Vantage key moves to GitHub Actions; then the password check uses the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which is only there because the Pi serves plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
 - A domain security check: SPF, DMARC, MX and STARTTLS, HTTPS redirect, HSTS, certificate expiry, security.txt and DNSSEC for a domain you enter, through DNS-over-HTTPS, refusing private and local addresses, rate-limited with a counter in the database, with short timeouts.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.

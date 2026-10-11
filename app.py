@@ -21,6 +21,7 @@ import ransomware
 import rss
 import stack
 import stocks
+import trigger
 import vulns
 
 SECRET_FILE = Path(__file__).with_name(".flask_secret")
@@ -751,6 +752,20 @@ def submit_event():
 def api_items():
     """Same data as JSON. The world map will read from here later."""
     return jsonify(load_items(window_days()))
+
+
+@app.route("/tasks/collect", methods=["GET", "POST"])
+def collect_if_due():
+    """Visited every 5 minutes by an outside service: starts the collector on GitHub Actions
+    when the data is stale (see trigger.py). Plain text, never cached, not for search engines."""
+    try:
+        status, message = trigger.check(connect)
+    except DB_ERRORS as exc:
+        status, message = 503, f"Couldn't read the database ({type(exc).__name__})."
+    resp = Response(message + "\n", status, mimetype="text/plain")
+    resp.headers["Cache-Control"] = "no-store"
+    resp.headers["X-Robots-Tag"] = "noindex"
+    return resp
 
 
 @app.route("/password")

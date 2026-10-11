@@ -1,7 +1,8 @@
+import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from db import connect, count_by_category, cve_stats, get_meta, mark_collected, save_items, set_meta
+from db import ERRORS as DB_ERRORS, connect, count_by_category, cve_stats, get_meta, last_collected, mark_collected, save_items, set_meta
 from enrich import enrich
 from fetch import fetch_all
 from grouping import rules_fingerprint, save_all as save_story_groups, tag_articles
@@ -18,6 +19,10 @@ MAX_PER_SOURCE = 100   # safety cap so one noisy feed can't flood the database
 # full_pass_due), so the database isn't read in full 48 times a day.
 FULL_PASS_EVERY = timedelta(hours=24)
 SCORING_FILES = ("score.py", "enrich.py")
+
+# Runs are started by the site's /tasks/collect (see trigger.py). GitHub's own schedule stays in
+# the workflow as a backup; when it does fire, it skips data collected within this long.
+SCHEDULED_SKIP_WITHIN = timedelta(minutes=20)
 
 
 def recent_only(items):
@@ -44,7 +49,24 @@ def full_pass_due(conn, kev_fetched_before):
             or datetime.now(timezone.utc) - datetime.fromisoformat(last) > FULL_PASS_EVERY)
 
 
+def collected_recently():
+    """True when the last run finished within SCHEDULED_SKIP_WITHIN. If the database can't be
+    read, False: the run goes ahead and reports the problem itself."""
+    try:
+        conn = connect()
+        try:
+            when = last_collected(conn)
+        finally:
+            conn.close()
+    except DB_ERRORS:
+        return False
+    return bool(when) and datetime.now(timezone.utc) - when < SCHEDULED_SKIP_WITHIN
+
+
 def main():
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule" and collected_recently():
+        print(f"Scheduled run skipped: collected less than {SCHEDULED_SKIP_WITHIN.seconds // 60} minutes ago.")
+        return
     fetched = fetch_all()
     recent = recent_only(fetched)
 
