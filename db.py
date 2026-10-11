@@ -1,45 +1,19 @@
 import os
-import socket
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 try:
-    import turso_serverless     # only needed when TURSO_DATABASE_URL is set
-    from turso_serverless.session import Session as _TursoSession
+    import tursodb              # only needed when TURSO_DATABASE_URL is set
 except ImportError:
-    turso_serverless = None
+    tursodb = None
 
 DB_PATH = Path(__file__).with_name("sentryfeed.db")
 
 # What the database itself raises when a call fails, whichever database is in use; ERRORS adds
 # OSError, for a local file that can't be opened.
-DATABASE_ERRORS = (sqlite3.Error,) + ((turso_serverless.Error,) if turso_serverless else ())
+DATABASE_ERRORS = (sqlite3.Error,) + ((tursodb.Error,) if tursodb else ())
 ERRORS = DATABASE_ERRORS + (OSError,)
-
-# turso-serverless sets no timeout on its requests, so a stalled connection would hang a page
-# until Vercel stopped it. This is the default for connections that don't set their own (every
-# requests call in SentryFeed does): a wait for the next bytes, not a limit on a whole query.
-TURSO_TIMEOUT = 10
-
-
-if turso_serverless:
-    class _TursoConnection(turso_serverless.Connection):
-        """turso-serverless's connection, plus one retry when Turso has dropped the connection's
-        stream for being idle (a few seconds without a statement, for example while the collector
-        downloads EPSS scores). The retry runs on a fresh stream, and only when no transaction
-        was open: then nothing was half-written and the statement simply never ran. Inside a
-        transaction its uncommitted writes are gone, so the error is raised as before.
-        (_execute_stmt is the library's internal hook; the version is pinned in requirements.txt.)"""
-
-        def _execute_stmt(self, sql, params=None, named_params=None, want_rows=True):
-            idle_retry_safe = not self.in_transaction
-            try:
-                return super()._execute_stmt(sql, params, named_params, want_rows)
-            except turso_serverless.OperationalError as e:
-                if not (idle_retry_safe and "stream has expired" in str(e)):
-                    raise
-            return super()._execute_stmt(sql, params, named_params, want_rows)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -260,13 +234,14 @@ def connect(setup=None):
     # Stripped: a value pasted into a settings form often brings a newline with it.
     url = os.environ.get("TURSO_DATABASE_URL", "").strip()
     if url:
-        if turso_serverless is None:
+        if not url.startswith(("libsql://", "https://", "http://")):
+            # Not printed: in a CI log the value would be masked anyway, and it may be a token.
+            raise RuntimeError("TURSO_DATABASE_URL isn't a Turso address: it should start with libsql:// "
+                               "(the output of `turso db show <name> --url`)")
+        if tursodb is None:
             raise RuntimeError("TURSO_DATABASE_URL is set but turso-serverless isn't installed")
-        if socket.getdefaulttimeout() is None:
-            socket.setdefaulttimeout(TURSO_TIMEOUT)
-        token = os.environ.get("TURSO_AUTH_TOKEN", "").strip() or None
-        conn = _TursoConnection(_TursoSession(url, auth_token=token))
-        conn.row_factory = turso_serverless.Row
+        conn = tursodb.connect(url, auth_token=os.environ.get("TURSO_AUTH_TOKEN", "").strip() or None)
+        conn.row_factory = tursodb.turso_serverless.Row
     else:
         conn = sqlite3.connect(DB_PATH)
         conn.row_factory = sqlite3.Row

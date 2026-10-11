@@ -328,7 +328,14 @@ The key files above are how the Pi keeps its settings. Anywhere files can't be k
 | `FLASK_SECRET_KEY` | `.flask_secret` | signing the event form; on Vercel the app refuses to start without it, since its files are read-only |
 | `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | `sentryfeed.db` | use a [Turso](https://turso.tech) database instead of the local file |
 
-With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [turso-serverless](https://pypi.org/project/turso-serverless/) (pinned to one version in `requirements.txt`). Pages then skip creating tables, which would cost a network round trip per statement on every visit; the collector still does it. Two things it adds on top of the library: a 10-second limit on waiting for Turso to answer (the library sets none), and one retry on a fresh connection when Turso has closed an idle one (the collector can sit for a while downloading EPSS scores), but only when no transaction was open, so nothing half-written is ever retried.
+With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [turso-serverless](https://pypi.org/project/turso-serverless/) (pinned to one version in `requirements.txt`), with changes in `tursodb.py` for a collector that may run on the other side of the world from the database:
+
+- **One kept-open connection** instead of a new one, with a new TLS handshake, for every statement. From Dubai to Turso in Mumbai that took queries from about 250 ms to about 70 ms, and the handshake was the step that most often timed out.
+- **`executemany` sends rows 200 at a time** instead of one request each, inside the same transaction; within a batch each row runs only if the one before succeeded. 2,000 rows take under a second instead of minutes, and the daily refresh of CISA's list and EPSS scores is a few requests rather than thousands.
+- **Retries only when nothing can have run:** a failed connection attempt, a request that failed while still being sent on a reused connection (the server may have closed it), and Turso dropping an idle stream outside a transaction. A failure after a request was sent is never retried, since the statement may have run; inside a transaction it's raised, and the uncommitted writes are rolled back.
+- **A 10-second limit** on connecting and on waiting for the next part of an answer (the library sets none).
+
+Pages skip creating tables, which would cost a network round trip per statement on every visit; the collector still does it. Settings are stripped of stray spaces and newlines (a value pasted into a form often brings one), and a `TURSO_DATABASE_URL` that isn't a Turso address is refused with a plain message.
 
 On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from the `x-vercel-forwarded-for` header, which Vercel sets itself and visitors can't fake. Anywhere else that header could be sent by anyone, so the connection's own address is used. Either way only a keyed hash of it is stored.
 
