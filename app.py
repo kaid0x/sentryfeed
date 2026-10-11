@@ -8,13 +8,11 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import sqlite3
-
 import requests
-from flask import Flask, Response, abort, g, jsonify, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, g, has_request_context, jsonify, redirect, render_template, request, url_for
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from db import connect, last_collected
+from db import DATABASE_ERRORS, ERRORS as DB_ERRORS, connect as open_database, last_collected
 from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
 import events
@@ -29,8 +27,14 @@ SECRET_FILE = Path(__file__).with_name(".flask_secret")
 
 
 def load_secret():
-    """A random key made on first run and kept in .flask_secret (never committed).
-    O_EXCL means two gunicorn workers starting at once can't each make a different key."""
+    """FLASK_SECRET_KEY from the environment (Vercel), or a random key made on first run and
+    kept in .flask_secret (never committed). O_EXCL means two gunicorn workers starting at
+    once can't each make a different key."""
+    if os.environ.get("FLASK_SECRET_KEY"):
+        return os.environ["FLASK_SECRET_KEY"]
+    if os.environ.get("VERCEL"):
+        # Vercel's files are read-only, and a key made per instance would differ between them.
+        raise RuntimeError("Set FLASK_SECRET_KEY in the Vercel project's environment variables")
     try:
         fd = os.open(SECRET_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
@@ -121,14 +125,27 @@ def load_week(start, end):
     return briefing.prepare(stories)
 
 
+def connect():
+    """A database connection. Once the database has failed during a request, later attempts
+    in the same request fail straight away instead of waiting out the timeout again."""
+    if has_request_context() and g.get("db_error"):
+        raise g.db_error
+    return open_database()
+
+
 def collected_time():
-    """When the collector last finished (db.last_collected), read once per request."""
+    """When the collector last finished (db.last_collected), read once per request. None if
+    the database can't be read (then g.db_error), so pages that don't need it, like the tools, still load."""
     if "collected" not in g:
-        conn = connect()
+        g.collected = None
         try:
-            g.collected = last_collected(conn)
-        finally:
-            conn.close()
+            conn = connect()
+            try:
+                g.collected = last_collected(conn)
+            finally:
+                conn.close()
+        except DB_ERRORS as exc:
+            g.db_error = exc
     return g.collected
 
 
@@ -161,6 +178,7 @@ def inject_page_basics():
         "site_today": datetime.now(briefing.DUBAI),
         "site_collected": collected,
         "site_updated": last_updated(),
+        "site_db_down": "db_error" in g,
     }
 
 
@@ -199,13 +217,32 @@ def compress(resp):
     return resp
 
 
+@app.errorhandler(DATABASE_ERRORS[0])
+def database_unavailable(exc):
+    """A page without its own error state (see page_or_unavailable) couldn't read the
+    database: say so plainly, with 503 so feed readers and crawlers try again later."""
+    g.db_error = exc
+    error = type(exc).__name__
+    if request.path.startswith("/api/"):
+        return jsonify(error=f"database unavailable ({error})"), 503
+    if request.path.startswith("/feeds/"):
+        return Response(f"SentryFeed couldn't read its database ({error}). Try again in a few minutes.\n",
+                        503, mimetype="text/plain")
+    return render_template("unavailable.html", error=error, active=None), 503
+
+
+if len(DATABASE_ERRORS) > 1:        # turso-serverless's errors, when it's installed
+    app.register_error_handler(DATABASE_ERRORS[1], database_unavailable)
+
+
 def page_or_unavailable(template, build, **context):
     """Render a page from build(), or the same template in its error state if the
     database can't be read (the collector may be part-way through a run)."""
     try:
         data, error = build(), None
-    except (sqlite3.Error, OSError) as exc:
+    except DB_ERRORS as exc:
         data, error = None, type(exc).__name__
+        g.db_error = exc
     page = render_template(template, data=data, error=error, **context)
     return (page, 503) if error else page
 
@@ -553,7 +590,7 @@ def vendors():
     def build():
         # Only changes when CISA's list does, so it's kept until the collector runs again.
         stamp = collected_time()
-        if _VENDOR_CACHE.get("stamp") != stamp:
+        if "rows" not in _VENDOR_CACHE or _VENDOR_CACHE["stamp"] != stamp:
             conn = connect()
             try:
                 rows = vulns.vendor_index(conn)
@@ -656,7 +693,13 @@ def feed_xml(name):
 
 
 def visitor_address():
-    # Behind a reverse proxy (Vercel later) this becomes the proxy's address; see README.
+    """The visitor's IP, for rate limits (only ever stored as a keyed hash). On Vercel every
+    request arrives through its proxy, which overwrites x-vercel-forwarded-for with the real
+    client address, so a visitor can't fake it. Elsewhere (the Pi) that header could be sent
+    by anyone, so the connection's own address is used."""
+    if os.environ.get("VERCEL"):
+        forwarded = request.headers.get("x-vercel-forwarded-for") or request.headers.get("x-forwarded-for") or ""
+        return forwarded.split(",")[0].strip()
     return request.remote_addr or ""
 
 

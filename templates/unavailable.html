@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}Unavailable · SentryFeed{% endblock %}
+
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .unavailable { padding: 32px 0 56px; }
+  .unavailable h1 { font: 700 32px/1.2 var(--serif); margin: 0 0 12px; }
+  .unavailable p { font: italic 18px/1.5 var(--serif); color: var(--muted); max-width: 38em; margin: 0 0 12px; }
+</style>
+{% endblock %}
+
+{% block body %}
+<main class="wrap unavailable">
+  <h1>This page can't load right now</h1>
+  <p>SentryFeed couldn't read its database ({{ error }}). Reload in a minute.</p>
+  <p>The <a href="/password">password check</a>, <a href="/scan">file check</a> and <a href="/headers">header analyser</a> still work: they run in your browser.</p>
+</main>
+{% endblock %}

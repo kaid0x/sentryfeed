@@ -1,8 +1,45 @@
+import os
+import socket
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    import turso_serverless     # only needed when TURSO_DATABASE_URL is set
+    from turso_serverless.session import Session as _TursoSession
+except ImportError:
+    turso_serverless = None
+
 DB_PATH = Path(__file__).with_name("sentryfeed.db")
+
+# What the database itself raises when a call fails, whichever database is in use; ERRORS adds
+# OSError, for a local file that can't be opened.
+DATABASE_ERRORS = (sqlite3.Error,) + ((turso_serverless.Error,) if turso_serverless else ())
+ERRORS = DATABASE_ERRORS + (OSError,)
+
+# turso-serverless sets no timeout on its requests, so a stalled connection would hang a page
+# until Vercel stopped it. This is the default for connections that don't set their own (every
+# requests call in SentryFeed does): a wait for the next bytes, not a limit on a whole query.
+TURSO_TIMEOUT = 10
+
+
+if turso_serverless:
+    class _TursoConnection(turso_serverless.Connection):
+        """turso-serverless's connection, plus one retry when Turso has dropped the connection's
+        stream for being idle (a few seconds without a statement, for example while the collector
+        downloads EPSS scores). The retry runs on a fresh stream, and only when no transaction
+        was open: then nothing was half-written and the statement simply never ran. Inside a
+        transaction its uncommitted writes are gone, so the error is raised as before.
+        (_execute_stmt is the library's internal hook; the version is pinned in requirements.txt.)"""
+
+        def _execute_stmt(self, sql, params=None, named_params=None, want_rows=True):
+            idle_retry_safe = not self.in_transaction
+            try:
+                return super()._execute_stmt(sql, params, named_params, want_rows)
+            except turso_serverless.OperationalError as e:
+                if not (idle_retry_safe and "stream has expired" in str(e)):
+                    raise
+            return super()._execute_stmt(sql, params, named_params, want_rows)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -215,11 +252,25 @@ def last_collected(conn):
     return None
 
 
-def connect():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    _migrate(conn)
+def connect(setup=None):
+    """A connection to Turso when TURSO_DATABASE_URL is set (with TURSO_AUTH_TOKEN), otherwise
+    to the local sentryfeed.db. `setup` creates missing tables, columns and indexes: the
+    collector always asks for it, and by default only a local file gets it, since on Turso
+    each statement is a network round trip and pages would pay for it on every visit."""
+    url = os.environ.get("TURSO_DATABASE_URL")
+    if url:
+        if turso_serverless is None:
+            raise RuntimeError("TURSO_DATABASE_URL is set but turso-serverless isn't installed")
+        if socket.getdefaulttimeout() is None:
+            socket.setdefaulttimeout(TURSO_TIMEOUT)
+        conn = _TursoConnection(_TursoSession(url, auth_token=os.environ.get("TURSO_AUTH_TOKEN")))
+        conn.row_factory = turso_serverless.Row
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+    if setup or (setup is None and not url):
+        conn.executescript(SCHEMA)
+        _migrate(conn)
     return conn
 
 
@@ -227,8 +278,7 @@ def save_items(conn, items):
     """Insert items, silently skipping any link already stored.
     Returns how many were actually new."""
     now = datetime.now(timezone.utc).isoformat()
-    before = conn.total_changes
-    conn.executemany(
+    cur = conn.executemany(
         """INSERT OR IGNORE INTO items
                (link, category, source, title, summary, published, fetched_at)
            VALUES
@@ -236,7 +286,7 @@ def save_items(conn, items):
         [{**item, "fetched_at": now} for item in items if item["link"]],
     )
     conn.commit()
-    return conn.total_changes - before
+    return max(cur.rowcount, 0)     # rows inserted; links already stored are skipped
 
 
 def count_by_category(conn):

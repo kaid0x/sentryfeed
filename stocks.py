@@ -15,6 +15,7 @@ next to the market's, never a claim that the breach caused it.
 
 Run `python stocks.py` to update and print what it found.
 """
+import os
 import re
 import time
 import zlib
@@ -317,12 +318,18 @@ def short_name(legal_name):
 
 # ---------- outside lookups ----------
 
+def _setting(env_name, path):
+    """An environment variable, or the file the Pi keeps it in, or None."""
+    value = os.environ.get(env_name) or (path.read_text().strip() if path.exists() else "")
+    return value or None
+
+
 def av_key():
-    return AV_KEY_FILE.read_text().strip() if AV_KEY_FILE.exists() else None
+    return _setting("ALPHAVANTAGE_KEY", AV_KEY_FILE)
 
 
 def sec_contact():
-    return SEC_CONTACT_FILE.read_text().strip() if SEC_CONTACT_FILE.exists() else None
+    return _setting("SEC_CONTACT", SEC_CONTACT_FILE)
 
 
 def _today():

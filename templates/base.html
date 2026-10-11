@@ -116,7 +116,7 @@
 <header class="masthead {% block masthead_class %}slim{% endblock %}">
   <div class="dateline">
     <span>{{ site_today.strftime("%A %-d %B %Y") }}</span>
-    <span class="dateline-updated">{% if site_collected %}Updated {{ site_collected.strftime("%H:%M") }} Dubai time ({{ site_updated }}){% else %}No stories collected yet{% endif %}</span>
+    <span class="dateline-updated">{% if site_collected %}Updated {{ site_collected.strftime("%H:%M") }} Dubai time ({{ site_updated }}){% elif site_db_down %}Can't reach the database right now{% else %}No stories collected yet{% endif %}</span>
     {{ ui.theme_button() }}
   </div>
   <a class="nameplate" href="/">SentryFeed</a>

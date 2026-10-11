@@ -286,6 +286,7 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 - **Each article is tagged once.** Its countries (`geo.py`) and products (`stack.py`) depend only on its own title and summary, so the collector works them out when it arrives and keeps them in the `items` table, along with whether it's a Gulf article. That used to be redone for every article on every grouping, about 80% of the time it took. The collector keeps a fingerprint of `geo.py` and `stack.py` and re-tags every article once when either changes, so a rule change applies to old stories too.
 - **CVE mentions are indexed.** When an article's CVE IDs are found, each one is also recorded in a small `item_cves` table. A CVE's page and the "N stories on SentryFeed" counts on `/vulns` look CVEs up there instead of searching the text of every stored article: at a year's worth of articles that's about 1,900 rows read for `/vulns` instead of over a million. The counts are exact (they used to stop at 10).
 - **Most runs recheck only the last 14 days.** An article's colour depends only on its own text, its CVE scores and the scoring rules, so a normal run looks up CVE scores and rescores the articles from the last 14 days: every article a run can add, and what most pages show. A full pass rechecks every article on the run that refreshes CISA's list (once a day; CISA often adds old flaws, which can turn an old story red), whenever `score.py` or `enrich.py` changes, and at least every 24 hours. The one delay: an older article whose CVE gets its first score through a newer article updates at the next full pass. Finding articles not yet tagged uses small indexes of just those articles. At a year's worth of articles, a normal run reads about 19,000 rows instead of 256,000, which matters on Turso, where reads are counted. The totals at the end of the collector's output ("Items mentioning CVEs", "Database now holds") are printed on full passes only, since working them out reads every article.
+- **If the database can't be reached, pages say so.** Pages show an honest "couldn't read its database, reload in a minute" message with HTTP 503 (so feed readers and crawlers retry later), `/api/items` answers with a JSON error and the RSS feeds with plain text. The masthead says the database can't be reached, and the browser-only tools (password check, file check, header analyser) keep working. Once the database has failed during a request, later attempts in that request fail straight away, so a stalled database costs one 10-second wait, not several.
 - **Only rows that changed are written.** The collector rescores articles (see above), but writes one only when its colour, reason, score or exploited flag actually changed. The same goes for CISA's catalogue (only new, changed or removed flaws), the fixed list of London, Dubai and Abu Dhabi companies, stock mentions and the saved story groups. A run with no new articles now writes a couple of rows instead of rewriting the whole database (985 rows a run before, and growing with every article), which matters for the planned move to Turso, where writes are counted.
 - **Stories are grouped by the collector, not on page visits.** Grouping took 3 to 7 seconds per page on the Pi, paid by the first visitor after every collector run (once per gunicorn worker). Now each run groups every window the pages use (24 hours, 3, 7 and 14 days, the Gulf page's articles, and the digest's last three weeks) and saves them, compressed, in the `story_groups` table. Pages read them back, and only the "5m ago" ages are worked out on each visit. A window that wasn't saved (an older digest week, or a saved copy from an older version of the code) is grouped on the spot instead, so the pages never depend on it. Within a gunicorn worker the result is also kept in memory until the collector's next run; each run records when it finished for that. (Not the database file's modification time: CVE lookups and event submissions write to it too.)
 - **Pages are compressed, except where that could leak a secret.** Gzip shrinks the map pages to about a third. The event form page is left uncompressed: it shows back what a visitor typed next to a form token, which is the setup the BREACH attack uses to guess secrets from response sizes.
@@ -314,6 +315,23 @@ python collect.py          # first run
 python app.py              # dashboard on port 5000, Ctrl+C to stop
 ```
 
+### Settings from the environment
+
+The key files above are how the Pi keeps its settings. Anywhere files can't be kept, like Vercel or GitHub Actions, the same settings come from environment variables instead; when both exist, the environment variable wins.
+
+| Environment variable | Instead of | What it's for |
+|---|---|---|
+| `NVD_API_KEY` | `.nvd_api_key` | faster CVE lookups |
+| `RANSOMWARE_LIVE_KEY` | `.ransomware_key` | the ransomware stats |
+| `SEC_CONTACT` | `.sec_contact` | SEC filings on the stocks page |
+| `ALPHAVANTAGE_KEY` | `.alphavantage_key` | share prices |
+| `FLASK_SECRET_KEY` | `.flask_secret` | signing the event form; on Vercel the app refuses to start without it, since its files are read-only |
+| `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` | `sentryfeed.db` | use a [Turso](https://turso.tech) database instead of the local file |
+
+With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [turso-serverless](https://pypi.org/project/turso-serverless/) (pinned to one version in `requirements.txt`). Pages then skip creating tables, which would cost a network round trip per statement on every visit; the collector still does it. Two things it adds on top of the library: a 10-second limit on waiting for Turso to answer (the library sets none), and one retry on a fresh connection when Turso has closed an idle one (the collector can sit for a while downloading EPSS scores), but only when no transaction was open, so nothing half-written is ever retried.
+
+On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from the `x-vercel-forwarded-for` header, which Vercel sets itself and visitors can't fake. Anywhere else that header could be sent by anyone, so the connection's own address is used. Either way only a keyed hash of it is stored.
+
 To run it permanently:
 
 ```bash
@@ -329,7 +347,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
-- Event rate limits use the visitor's IP. Behind a proxy (Vercel, later) every visitor shares the proxy's address, so the real IP has to be read from the proxy's header first.
 - Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned

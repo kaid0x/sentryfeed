@@ -48,7 +48,7 @@ def main():
     fetched = fetch_all()
     recent = recent_only(fetched)
 
-    conn = connect()
+    conn = connect(setup=True)
     new = save_items(conn, recent)
     print(f"Fetched {len(fetched)} items, kept {len(recent)} from the last {MAX_AGE_DAYS} days.")
     print(f"{new} new, {len(recent) - new} already stored.")
