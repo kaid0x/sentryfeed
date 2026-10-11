@@ -1,6 +1,6 @@
 # SentryFeed
 
-A self-hosted threat-intel site running on a Raspberry Pi 3B. Every 30 minutes it pulls security and tech news, looks up the CVEs each story mentions, checks whether CISA has confirmed they're being exploited, and colours every story by how much it matters. The front page reads like a newspaper: what matters today in one sentence, the most important stories, then sections for exploited flaws, the Gulf, markets and the week.
+A threat-intel site at **https://sentryfeed.vercel.app**. It began on a Raspberry Pi 3B at home and now runs on Vercel, with its database on Turso and its collector on GitHub Actions (see [Setup](#setup)); the Pi still runs its own copy while the move settles. Every 30 minutes it pulls security and tech news, looks up the CVEs each story mentions, checks whether CISA has confirmed they're being exploited, and colours every story by how much it matters. The front page reads like a newspaper: what matters today in one sentence, the most important stories, then sections for exploited flaws, the Gulf, markets and the week.
 
 ![SentryFeed's front page: the day in one sentence, the lead story, and the next most important stories](docs/dashboard.png)
 
@@ -30,7 +30,7 @@ Severity reasons are written in plain words across the site: "Remote code execut
 ## How it works
 
 ```
-RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> browser
+RSS feeds ──> collect.py ──> SQLite or Turso ──> Flask dashboard ──> browser
                │
                ├─ fetch.py    download and normalise 12 feeds
                ├─ enrich.py   pull CVE IDs, look up CVSS and CISA KEV status in NVD
@@ -249,7 +249,7 @@ Matching is case-sensitive on product names, nicknames and parts ("CitrixBleed" 
 
 `/events` lists cybersecurity events (CTFs, webinars, conferences, meetups, workshops) submitted through `/events/submit` by the people running them. Events starting in the next two weeks also appear under the feed's blue Events tile.
 
-**Nothing goes live until it's approved on the Pi's command line.** There's deliberately no admin page yet, so there's no login to attack:
+**Nothing goes live until it's approved on the command line.** There's deliberately no admin page yet, so there's no login to attack. Events submitted on Vercel are in the Turso database, so run these with `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` set (see [Settings from the environment](#settings-from-the-environment)); on the Pi, without them, they use its own file:
 
 ```bash
 python events.py pending           # what's waiting, with the submitter's optional contact email
@@ -364,11 +364,14 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - Events are spotted by title patterns; one worded like a normal headline lands in yellow, and opinion pieces still do.
 - The map reads wording, not meaning: "German police take down a Russian-speaking forum" draws a line from Russia to Germany, and many stories (a Chrome bug, a Microsoft patch) name no country at all.
 - "Blamed" is what the reporting says. Attribution is often disputed or later revised.
+- Collection runs on GitHub's scheduler, which can start runs late or skip them when GitHub is busy; the masthead's "Updated ... ago" always shows when it last ran.
 - Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
 
+- Finish the move: a week of Vercel and the Pi side by side, then the Pi retires and the Alpha Vantage key moves to GitHub Actions; a custom domain; HTTPS-only extras (one-click copy on `/feeds`, the browser's own hashing instead of the bundled SHA-1/SHA-256 code).
+- A domain security check: SPF, DMARC, MX and STARTTLS, HTTPS redirect, HSTS, certificate expiry, security.txt and DNSSEC for a domain you enter, through DNS-over-HTTPS, refusing private and local addresses, rate-limited with a counter in the database, with short timeouts.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
-- An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the Pi's command line.
+- An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
 - A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
