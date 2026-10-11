@@ -4,11 +4,11 @@ name: Collect
 # own SQLite file. Settings come from the repository's Actions secrets; secret values are
 # masked in the logs, which are public on a public repository.
 on:
-  # Runs are started through the API by the site's /tasks/collect (trigger.py), which an
-  # outside service visits every 5 minutes: GitHub's schedule never fired for this repository.
-  # The schedule stays as a backup; a scheduled run skips itself when the data is under 20
-  # minutes old (collect.py). GitHub turns schedules off after 60 days without activity in
-  # the repository; re-enable it from the Actions tab if that happens.
+  # Runs are also started through the API by the site's /tasks/collect (trigger.py), which an
+  # outside service visits every 5 minutes, since GitHub's schedule can't be relied on. A
+  # scheduled run skips itself when the data is under 20 minutes old (collect.py). GitHub
+  # turns schedules off after 60 days without activity in the repository; re-enable it from
+  # the Actions tab if that happens.
   schedule:
     - cron: "13,43 * * * *"
   workflow_dispatch:      # the Run workflow button, and /tasks/collect

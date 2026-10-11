@@ -1,8 +1,8 @@
 """Starts the collector on GitHub Actions when the data is stale.
 
-GitHub's own schedule never fired for this repository (11 Oct 2026: a known GitHub problem,
-where manual runs work and scheduled ones never start), so an outside service visits
-/tasks/collect every 5 minutes instead. The visit carries no secret. This asks GitHub for a
+GitHub's own schedule can't be relied on (11 Oct 2026: five and a half hours without a scheduled
+run while manual runs worked, a problem many have reported), so an outside service also visits
+/tasks/collect every 5 minutes. The visit carries no secret. This asks GitHub for a
 run only when the last collection is over FRESH_FOR old and no run was asked for in the last
 RUN_GAP, so however often anyone visits, it starts no more runs than a schedule would. The
 GitHub token (GITHUB_DISPATCH_TOKEN, allowed only to start workflows in this repository)
