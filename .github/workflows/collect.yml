@@ -7,6 +7,8 @@ on:
   # Every 30 minutes, at :13 and :43 UTC: GitHub delays (and at busy times drops) scheduled
   # runs, most of all at the start of the hour. GitHub turns schedules off after 60 days
   # without activity in the repository; re-enable it from the Actions tab if that happens.
+  # GitHub registers a schedule when a commit changes this file; if scheduled runs never
+  # start, a small edit here and a push registers it again.
   schedule:
     - cron: "13,43 * * * *"
   workflow_dispatch:      # the Run workflow button
