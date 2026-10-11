@@ -1,8 +1,10 @@
+import time
 from datetime import datetime, timedelta, timezone
 
 from db import connect, count_by_category, cve_stats, mark_collected, save_items
 from enrich import enrich
 from fetch import fetch_all
+from grouping import save_all as save_story_groups
 from score import score_all
 from stocks import update as update_stocks
 from ransomware import update as update_ransomware
@@ -58,6 +60,15 @@ def main():
         update_ransomware(conn)
     except Exception as e:
         print(f"Ransomware stats: failed ({e.__class__.__name__}: {e})")
+
+    # After scoring, so the saved stories carry this run's colours. If it fails, pages
+    # group the stories themselves, as before.
+    try:
+        started = time.monotonic()
+        saved = save_story_groups(conn)
+        print(f"Story groups: {saved} windows saved in {time.monotonic() - started:.1f}s")
+    except Exception as e:
+        print(f"Story groups: failed ({e.__class__.__name__}: {e})")
 
     stats = cve_stats(conn)
     counts = count_by_category(conn)

@@ -7,7 +7,6 @@ import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
 
 import sqlite3
 
@@ -16,10 +15,10 @@ from flask import Flask, Response, abort, g, jsonify, redirect, render_template,
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from db import connect, last_collected
-from dedupe import group_stories
-from geo import locate
+from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
 import events
+import grouping
 import ransomware
 import rss
 import stack
@@ -59,87 +58,39 @@ FORM_MIN_SECONDS = 3          # people take longer than this to fill it in; bots
 PWNED_RANGE_URL = "https://api.pwnedpasswords.com/range/{}"
 HASH_PREFIX_RE = re.compile(r"^[0-9A-F]{5}$")
 
-# Order matters: this is the sort order and the order of the filter tiles.
-SEVERITIES = [
-    ("red", "Major"),
-    ("orange", "Medium"),
-    ("yellow", "Low"),
-    ("green", "Tech & AI"),
-    ("blue", "Events"),
-]
-RANK = {key: i for i, (key, _) in enumerate(SEVERITIES)}
 # Events are rare, so their tile only appears when there's at least one to show.
 OPTIONAL_TILES = {"blue"}
 WINDOWS = [(1, "24h"), (3, "3 days"), (7, "7 days"), (14, "14 days")]
 DEFAULT_DAYS = 3
 
 
-def safe_link(url):
-    """Feed content is untrusted input. Only allow http(s) links, so a poisoned
-    feed can't slip a javascript: URL into the page."""
-    return url if urlparse(url or "").scheme in ("http", "https") else None
-
-
-def ago(iso, now):
-    if not iso:
-        return ""
-    minutes = int((now - datetime.fromisoformat(iso)).total_seconds() // 60)
-    if minutes < 60:
-        return f"{max(minutes, 1)}m ago"
-    if minutes < 48 * 60:
-        return f"{minutes // 60}h ago"
-    return f"{minutes // 1440}d ago"
-
-
-def load_items_ungrouped(days=None, start=None, end=None):
-    """Every item in the window, one per article: the last `days` days, or from `start`
-    up to (not including) `end`, both timezone-aware datetimes."""
-    now = datetime.now(timezone.utc)
-    columns = """SELECT id, category, source, title, summary, link, published,
-                        cves, cvss, kev, severity, severity_reason FROM items"""
-    conn = connect()
-    if start is not None:
-        rows = conn.execute(
-            columns + " WHERE severity IS NOT NULL AND published >= ? AND published < ?",
-            (start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            columns + " WHERE severity IS NOT NULL AND (published IS NULL OR published >= ?)",
-            ((now - timedelta(days=days)).isoformat(),),
-        ).fetchall()
-    conn.close()
-
-    items = []
-    for row in rows:
-        item = dict(row)
-        item["link"] = safe_link(item["link"])
-        item["age"] = ago(item["published"], now)
-        item["cves"] = [c for c in (item["cves"] or "").split(",") if c]
-        items.append(item)
-
-    # Two stable sorts: newest first, then by severity. Result: red block on top,
-    # newest-first within each colour.
-    items.sort(key=lambda i: i["published"] or "", reverse=True)
-    items.sort(key=lambda i: RANK.get(i["severity"], len(RANK)))
-    return items
-
-
-# What the page needs about each other outlet covering a story.
-ALSO_FIELDS = ("id", "source", "title", "link", "age", "published", "match")
-
-# Grouped stories per window, kept until the collector runs again. Grouping takes a few
-# seconds on the Pi, and the stories only change when the collector runs.
+# Grouped stories per window, kept until the collector runs again. The collector saves them
+# (grouping.save_all), so this only saves re-reading them from the database on every visit.
 _STORY_CACHE = {}
 
 
+def _grouped(key, **window):
+    """The collector's saved grouping for this window, or grouped now if it has none."""
+    conn = connect()
+    try:
+        stories = grouping.saved(conn, key)
+        if stories is None:
+            if "days" in window:
+                app.logger.warning("No saved grouping for the %s-day window, so grouping it now",
+                                   window["days"])
+            stories = grouping.group(conn, **window)
+    finally:
+        conn.close()
+    return stories
+
+
 def load_items(days):
-    """One entry per story, ready for the pages (see _group_items). Each call gets its
+    """One entry per story, ready for the pages (see grouping.group). Each call gets its
     own copy, with ages worked out afresh and anything older than the window dropped."""
     stamp = collected_time()
     cached = _STORY_CACHE.get(days)
     if cached is None or cached[0] != stamp:
-        cached = (stamp, _group_items(days))
+        cached = (stamp, _grouped(grouping.days_key(days), days=days))
         _STORY_CACHE[days] = cached
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
@@ -157,7 +108,7 @@ def load_week(start, end):
     stamp = collected_time()
     cached = _STORY_CACHE.get(key)
     if cached is None or cached[0] != stamp:
-        cached = (stamp, _group_items(start=start, end=end))
+        cached = (stamp, _grouped(grouping.week_key(start), start=start, end=end))
         _STORY_CACHE[key] = cached
     now = datetime.now(timezone.utc)
     stories = copy.deepcopy(cached[1])
@@ -166,29 +117,6 @@ def load_week(start, end):
         for other in story["also"]:
             other["age"] = ago(other["published"], now)
     return briefing.prepare(stories)
-
-
-def _group_items(days=None, start=None, end=None):
-    """One entry per story. When several outlets covered it, the highest-ranked
-    article leads (so the story takes its colour), and the rest are listed under
-    "also" with their CVEs and countries added to the lead's."""
-    stories = group_stories(load_items_ungrouped(days, start, end), RANK)
-    for story in stories:
-        others = story["also"]
-        members = [story, *others]
-        story["cves"] = sorted(set(story["cves"]).union(*(m["cves"] for m in others)))
-        story["kev"] = int(any(m["kev"] for m in members))
-        where, blamed, products = set(), set(), set()
-        for m in members:
-            w, b = locate(m)
-            where.update(w)
-            blamed.update(b)
-            if story["severity"] in stack.SECURITY_SEVERITIES:
-                products.update(stack.match(m))
-        story["where"], story["blamed"] = sorted(where), sorted(blamed)
-        story["products"] = sorted(products)
-        story["also"] = [{k: m.get(k) for k in ALSO_FIELDS} for m in others]
-    return stories
 
 
 def collected_time():
@@ -495,10 +423,9 @@ def first_story_time():
     """When SentryFeed's first story was published, or None with no stories yet."""
     conn = connect()
     try:
-        first = conn.execute("SELECT MIN(published) FROM items WHERE severity IS NOT NULL").fetchone()[0]
+        return grouping.first_published(conn)
     finally:
         conn.close()
-    return datetime.fromisoformat(first) if first else None
 
 
 def first_week_start():
@@ -791,15 +718,12 @@ def ransomware_stats():
     return page_or_unavailable("ransomware.html", build, active="ransomware", months_wanted=ransomware.MONTHS)
 
 
-PULSE_MAX_DAYS = 365
-
-
 @app.route("/gulf")
 def gulf_pulse():
     first = first_story_time()
 
     def build():
-        days = min(PULSE_MAX_DAYS, (datetime.now(timezone.utc) - first).days + 1) if first else 1
+        days = grouping.gulf_days(first, datetime.now(timezone.utc))
         news = briefing.gulf_pulse(load_items(days))
         for s in news["latest"]:
             s["link"] = safe_link(s["link"])

@@ -108,9 +108,10 @@ def group_stories(items, rank):
 
 def main():
     """Print the groups the dashboard would make from the last 14 days."""
-    from app import RANK, load_items_ungrouped
+    from db import connect
+    from grouping import RANK, ungrouped
 
-    items = load_items_ungrouped(14)
+    items = ungrouped(connect(), 14)
     groups = group_stories(items, RANK)
     merged = [g for g in groups if g["also"]]
     print(f"{len(items)} items -> {len(groups)} stories ({len(merged)} merged groups)\n")

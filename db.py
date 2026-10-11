@@ -123,6 +123,13 @@ CREATE TABLE IF NOT EXISTS ransomware_counts (
     count       INTEGER NOT NULL,
     PRIMARY KEY (month, dimension, key)
 );
+-- Grouped stories per window (grouping.py), saved by the collector so pages don't group on each visit.
+CREATE TABLE IF NOT EXISTS story_groups (
+    key         TEXT PRIMARY KEY,           -- 'days:7', or 'week:' and the Monday it starts
+    format      INTEGER NOT NULL,           -- grouping.FORMAT when saved; pages ignore other versions
+    stories     BLOB NOT NULL,              -- zlib-compressed JSON list, one entry per story
+    made_at     TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (           -- small facts about the database, like when the collector last ran
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL

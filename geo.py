@@ -287,9 +287,10 @@ def locate(item):
 
 def main():
     """Print what the map would show for the last 14 days."""
-    from app import load_items_ungrouped
+    from db import connect
+    from grouping import ungrouped
 
-    items = [i for i in load_items_ungrouped(14) if i["severity"] in ("red", "orange", "yellow")]
+    items = [i for i in ungrouped(connect(), 14) if i["severity"] in ("red", "orange", "yellow")]
     placed = 0
     for item in items:
         where, blamed, reasons = explain(item)

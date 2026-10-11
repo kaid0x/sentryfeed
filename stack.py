@@ -123,9 +123,10 @@ def catalog():
 
 
 def main():
-    from app import load_items_ungrouped
+    from db import connect
+    from grouping import ungrouped
 
-    items = [i for i in load_items_ungrouped(14) if i["severity"] in SECURITY_SEVERITIES]
+    items = [i for i in ungrouped(connect(), 14) if i["severity"] in SECURITY_SEVERITIES]
     tagged = 0
     for item in items:
         products = match(item)

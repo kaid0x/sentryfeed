@@ -36,9 +36,11 @@ RSS feeds ──> collect.py ──> SQLite ──> Flask dashboard ──> brow
                ├─ enrich.py   pull CVE IDs, look up CVSS and CISA KEV status in NVD
                └─ score.py    assign a colour and record why
 
-app.py ──> dedupe.py   group the same story from different outlets
-       ├─> geo.py      find the countries each story is about, for the map
-       └─> briefing.py the front page and map page, and the plain wording
+collect.py ──> grouping.py  group each window's stories once per run, saved for the pages
+                ├─> dedupe.py   group the same story from different outlets
+                └─> geo.py      find the countries each story is about, for the map
+
+app.py ──> briefing.py the front page and map page, and the plain wording
 
 collect.py ──> stocks.py   breached US-listed companies: SEC filings and share prices
            ├──> vulns.py    CISA's exploited list and EPSS scores, once a day
@@ -280,7 +282,7 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 - **A strict Content Security Policy.** Every page gets a fresh random nonce, and only scripts and styles carrying it may run. Pages may only connect back to this server, so the password page physically can't send anything elsewhere.
 - **A glossary where the jargon is.** Terms like KEV, CVSS, EPSS, CVE, zero-day, remote code execution, ransomware and hash have a dotted underline; clicking (or Enter) opens a one-line definition beside them, and Escape or a click elsewhere closes it. The definitions live in one place (`briefing.GLOSSARY`), so every page says the same thing. Without JavaScript they stay plain text, and they're never placed inside links or buttons.
 - **Designed like a newspaper.** The front page is a briefing, not a dashboard: serif headlines (system fonts only, since the security policy allows no web fonts), warm paper and ink colours, and severity shown as a coloured word before each headline ("Major.") rather than badges. Light and dark themes both work; the first visit follows the device's setting, a choice is remembered in the browser, and a small script in the page head sets it before anything is drawn, so there's no flash of the wrong theme. Every page shares the same masthead, grouped menus (Intel, Tools, Community; planned pages are named but not linked) and footer.
-- **Grouped stories are cached until the collector runs again.** Grouping the same story across outlets takes a few seconds on the Pi, and the stories only change when the collector runs. Each run records when it finished, so the grouped stories are kept until the next run and only the "5m ago" ages are worked out on each visit. (Not the database file's modification time: CVE lookups and event submissions write to it too.)
+- **Stories are grouped by the collector, not on page visits.** Grouping the same story across outlets, and finding each story's countries and products, took 3 to 7 seconds per page on the Pi, paid by the first visitor after every collector run (once per gunicorn worker). Now each run groups every window the pages use (24 hours, 3, 7 and 14 days, the Gulf page's window, and the digest's last three weeks) and saves them, compressed, in the `story_groups` table. Pages read them back, and only the "5m ago" ages are worked out on each visit. A window that wasn't saved (an older digest week, or a saved copy from an older version of the code) is grouped on the spot instead, so the pages never depend on it. Within a gunicorn worker the result is also kept in memory until the collector's next run; each run records when it finished for that. (Not the database file's modification time: CVE lookups and event submissions write to it too.)
 - **Pages are compressed, except where that could leak a secret.** Gzip shrinks the map pages to about a third. The event form page is left uncompressed: it shows back what a visitor typed next to a form token, which is the setup the BREACH attack uses to guess secrets from response sizes.
 - **systemd over cron.** It keeps the dashboard alive, restarts it on failure, starts it on boot, and logs every collector run to the journal. Both units are sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`) so they can only write inside the project folder.
 
