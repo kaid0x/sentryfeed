@@ -122,7 +122,7 @@ Comparisons only appear between two complete weeks: not for the week in progress
 
 Each item has the readable headline, the plain-word reason, the summary, the other outlets and the CVEs, and links to the article. An item's ID is the story's first stored article, so it doesn't reappear when more outlets cover the same story. Feeds are RSS 2.0, built with ElementTree so feed text is always escaped, and every page advertises the Major feeds for readers that look for them.
 
-**The stack feed is the one place a product list leaves the browser.** It has to be in the link, because a feed reader fetches the feed without the browser. The `/feeds` page builds the link from the products saved on My stack and says plainly that SentryFeed's server sees the list on every check, as does anyone the link is shared with. The Pi's gunicorn keeps no access log, so it isn't recorded; a host that logs requests (Vercel does) would record it, and this note should change with the move.
+**The stack feed is the one place a product list leaves the browser.** It has to be in the link, because a feed reader fetches the feed without the browser. The `/feeds` page builds the link from the products saved on My stack and says plainly that SentryFeed's server sees the list on every check, as does anyone the link is shared with. The Pi's gunicorn keeps no access log, so there it isn't recorded. On Vercel the page says instead that Vercel records each request, link included, in its request logs, which the free plan keeps for an hour.
 
 ## Vulnerabilities
 
@@ -338,6 +338,10 @@ With `TURSO_DATABASE_URL` set, SentryFeed talks to Turso over HTTPS through [tur
 Pages skip creating tables, which would cost a network round trip per statement on every visit; the collector still does it. Settings are stripped of stray spaces and newlines (a value pasted into a form often brings one), and a `TURSO_DATABASE_URL` that isn't a Turso address is refused with a plain message.
 
 On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from the `x-vercel-forwarded-for` header, which Vercel sets itself and visitors can't fake. Anywhere else that header could be sent by anyone, so the connection's own address is used. Either way only a keyed hash of it is stored.
+
+### Hosting the site on Vercel
+
+`vercel.json` runs the Flask app as one Vercel Function in Mumbai (`bom1`), the same AWS region as the Turso database (`aws-ap-south-1`), so each query is a short hop; `.python-version` pins Python 3.13, as on the Pi and in GitHub Actions. Vercel finds `app.py` and its `app` by itself. Only committed files are deployed from GitHub, and `.vercelignore` and the function's `excludeFiles` also keep the Pi's database, key files and local folders out of any deploy made with the Vercel CLI. The site needs `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` and `FLASK_SECRET_KEY` in the project's environment variables, plus `NVD_API_KEY` for live CVE lookups; `SEC_CONTACT` and `ALPHAVANTAGE_KEY` only change which explanations the stocks pages show, since the site itself never calls those services.
 
 ### Collecting with GitHub Actions
 

@@ -640,7 +640,8 @@ def feeds_page():
     feeds = [(name, title, desc, url_for("feed_xml", name=name, _external=True))
              for name, (title, desc) in rss.FEEDS.items()]
     return render_template("feeds.html", active="feeds", feeds=feeds, stack_names=stack.NAMES,
-                           stack_base=url_for("feed_xml", name="stack", _external=True), days=rss.FEED_DAYS)
+                           stack_base=url_for("feed_xml", name="stack", _external=True), days=rss.FEED_DAYS,
+                           on_vercel=bool(os.environ.get("VERCEL")))
 
 
 @app.route("/feeds/<name>.xml")

@@ -1,0 +1,16 @@
+# Never uploaded to Vercel. A Git deploy only sees committed files, but a deploy with the Vercel
+# CLI from this folder would also see the Pi's database, key files and local folders.
+sentryfeed.db*
+*.db
+.nvd_api_key
+.alphavantage_key
+.sec_contact
+.flask_secret
+.ransomware_key
+venv/
+.venv/
+__pycache__/
+evidence/
+tools/node_modules/
+CLAUDE.md
+.claude/

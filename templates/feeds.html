@@ -55,7 +55,7 @@
   <section class="stack-feed" aria-labelledby="h-stack">
     <h2 id="h-stack">Your stack</h2>
     <p>Only the stories about the products you picked on <a href="/stack">My stack</a>.</p>
-    <p class="privacy"><strong>Unlike My stack, this list leaves your browser.</strong> It's part of the feed's link, so SentryFeed's server sees it each time your reader checks for new stories, and so does anyone you share the link with. SentryFeed doesn't log or store it.</p>
+    <p class="privacy"><strong>Unlike My stack, this list leaves your browser.</strong> It's part of the feed's link, so SentryFeed's server sees it each time your reader checks for new stories, and so does anyone you share the link with. {% if on_vercel %}SentryFeed doesn't store it, but its host, Vercel, records each request, link included, in request logs kept for an hour.{% else %}SentryFeed doesn't log or store it.{% endif %}</p>
     <div id="stack-feed-out">
       <p>Your products are kept in your browser, so building this link needs JavaScript. Without it, a link like <code>{{ stack_base }}?stack=fortinet,exchange</code> works too.</p>
     </div>
