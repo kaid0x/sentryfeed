@@ -1,11 +1,15 @@
 name: Collect
 
 # The collector, writing to the Turso database: the job the Pi's systemd timer does for its
-# own SQLite file. Run it by hand from the Actions tab (the 30-minute schedule is added once a
-# manual run has been checked). Settings come from the repository's Actions secrets; secret
-# values are masked in the logs, which are public on a public repository.
+# own SQLite file. Settings come from the repository's Actions secrets; secret values are
+# masked in the logs, which are public on a public repository.
 on:
-  workflow_dispatch:
+  # Every 30 minutes, at :13 and :43 UTC: GitHub delays (and at busy times drops) scheduled
+  # runs, most of all at the start of the hour. GitHub turns schedules off after 60 days
+  # without activity in the repository; re-enable it from the Actions tab if that happens.
+  schedule:
+    - cron: "13,43 * * * *"
+  workflow_dispatch:      # the Run workflow button
 
 permissions:
   contents: read
@@ -17,7 +21,8 @@ concurrency:
 
 jobs:
   collect:
-    runs-on: ubuntu-latest
+    # A fixed release rather than ubuntu-latest, so an operating system upgrade is our choice.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       # Pinned to commits, not tags: a tag can later be moved to different code.

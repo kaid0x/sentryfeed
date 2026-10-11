@@ -343,7 +343,7 @@ On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from
 
 `.github/workflows/collect.yml` runs the collector on GitHub's machines against the Turso database, the job the Pi's systemd timer does for its own file. Its settings are the repository's Actions secrets, named as in the table above (`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` are required; it stops straight away without them rather than filling a throwaway file). It runs one at a time with a 20-minute limit, has read-only access to the repository, and uses actions pinned to commits rather than tags, since a tag can later be pointed at different code. The logs are public, as the repository is; they hold only counts and status lines, and GitHub masks every secret value in them.
 
-For now it runs only by hand (Actions tab, **Collect**, **Run workflow**); the 30-minute schedule is added once a manual run has been checked. While it runs alongside the Pi, only one of the two should have the Alpha Vantage key, since its 25 lookups a day are per key.
+It runs every 30 minutes, at :13 and :43 past the hour (UTC), away from the top of the hour when GitHub delays scheduled runs most, and by hand with **Run workflow** in the Actions tab. GitHub turns a schedule off after 60 days without any activity in a public repository; re-enabling it is one click in the Actions tab, and the site's "Updated ... ago" shows when collection has stopped. While it runs alongside the Pi, only one of the two should have the Alpha Vantage key, since its 25 lookups a day are per key.
 
 To run it permanently:
 
