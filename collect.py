@@ -1,10 +1,10 @@
 import time
 from datetime import datetime, timedelta, timezone
 
-from db import connect, count_by_category, cve_stats, mark_collected, save_items
+from db import connect, count_by_category, cve_stats, get_meta, mark_collected, save_items, set_meta
 from enrich import enrich
 from fetch import fetch_all
-from grouping import save_all as save_story_groups, tag_articles
+from grouping import rules_fingerprint, save_all as save_story_groups, tag_articles
 from score import score_all
 from stocks import update as update_stocks
 from ransomware import update as update_ransomware
@@ -12,6 +12,12 @@ from vulns import update as update_vulns
 
 MAX_AGE_DAYS = 14      # ignore anything older; MSRC alone publishes its whole history
 MAX_PER_SOURCE = 100   # safety cap so one noisy feed can't flood the database
+
+# Most runs recheck CVE scores and colours for the last MAX_AGE_DAYS only: the only articles a
+# run can add, and most of what the pages show. A full pass rechecks every article (see
+# full_pass_due), so the database isn't read in full 48 times a day.
+FULL_PASS_EVERY = timedelta(hours=24)
+SCORING_FILES = ("score.py", "enrich.py")
 
 
 def recent_only(items):
@@ -26,6 +32,16 @@ def recent_only(items):
         per_source[item["source"]] = seen + 1
         kept.append(item)
     return kept
+
+
+def full_pass_due(conn, kev_fetched_before):
+    """Recheck every article on the run that refreshed CISA's list (it often adds old flaws,
+    which turns old stories red), when the scoring code changed, or a day after the last one."""
+    last = get_meta(conn, "full_pass_at")
+    return (get_meta(conn, "kev_fetched") != kev_fetched_before
+            or get_meta(conn, "scoring_rules") != rules_fingerprint(SCORING_FILES)
+            or not last
+            or datetime.now(timezone.utc) - datetime.fromisoformat(last) > FULL_PASS_EVERY)
 
 
 def main():
@@ -45,16 +61,25 @@ def main():
 
     # CISA's exploited list and EPSS scores, once a day. Before enrich, so a newly listed
     # flaw marks its stories as exploited in this same run. Never stops the rest of the run.
+    kev_fetched_before = get_meta(conn, "kev_fetched")
     try:
         update_vulns(conn)
     except Exception as e:
         print(f"Vulnerabilities: failed ({e.__class__.__name__}: {e})")
 
-    lookups = enrich(conn)
+    full = full_pass_due(conn, kev_fetched_before)
+    since = None if full else (datetime.now(timezone.utc) - timedelta(days=MAX_AGE_DAYS)).isoformat()
+    scope = "every article (full pass)" if full else f"articles from the last {MAX_AGE_DAYS} days"
+    print(f"Rechecking CVE scores and colours for {scope}")
+
+    lookups = enrich(conn, since)
     note = "" if lookups["has_key"] else " (no NVD API key: slow public rate)"
     print(f"CVE lookups: {lookups['looked_up']} done, {lookups['pending']} still pending{note}")
 
-    severity = score_all(conn)
+    severity = score_all(conn, since)
+    if full:
+        set_meta(conn, "full_pass_at", datetime.now(timezone.utc).isoformat())
+        set_meta(conn, "scoring_rules", rules_fingerprint(SCORING_FILES))
 
     # Optional extra: never let it stop the rest of the run.
     try:
@@ -76,18 +101,20 @@ def main():
     except Exception as e:
         print(f"Story groups: failed ({e.__class__.__name__}: {e})")
 
-    stats = cve_stats(conn)
-    counts = count_by_category(conn)
+    # Totals read every article, so they're only worked out on a full pass.
+    stats = cve_stats(conn) if full else None
+    counts = count_by_category(conn) if full else None
     mark_collected(conn)
     conn.close()
 
-    print(f"Items mentioning CVEs: {stats['with_cves']}, scored: {stats['scored']}, "
-          f"actively exploited (CISA KEV): {stats['kev']}")
-    print("Severity: " + "  ".join(
+    print(("Severity: " if full else f"Severity, last {MAX_AGE_DAYS} days: ") + "  ".join(
         f"{c} {severity.get(c, 0)}" for c in ("red", "orange", "yellow", "green")))
-    print("Database now holds:")
-    for category, n in counts.items():
-        print(f"  {category:<11} {n}")
+    if full:
+        print(f"Items mentioning CVEs: {stats['with_cves']}, scored: {stats['scored']}, "
+              f"actively exploited (CISA KEV): {stats['kev']}")
+        print("Database now holds:")
+        for category, n in counts.items():
+            print(f"  {category:<11} {n}")
 
 
 if __name__ == "__main__":

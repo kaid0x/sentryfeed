@@ -25,6 +25,8 @@ CREATE TABLE IF NOT EXISTS items (
     gulf        INTEGER            -- 1 if from a Gulf outlet or naming a GCC country, for /gulf
 );
 CREATE INDEX IF NOT EXISTS idx_items_published ON items(published);
+-- Only the articles not checked for CVEs yet, so finding them doesn't read every article.
+CREATE INDEX IF NOT EXISTS idx_items_cves_untagged ON items(id) WHERE cves IS NULL;
 
 -- Which articles mention which CVE (enrich.py), so a CVE's stories are found with an index
 -- lookup instead of searching the text of every article.
@@ -179,8 +181,9 @@ def _migrate(conn):
         for name, definition in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
-    # After the columns exist: an older database only gets `gulf` from the loop above.
+    # After the columns exist: an older database only gets these columns from the loop above.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_gulf ON items(gulf, published)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_geo_untagged ON items(id) WHERE where_cc IS NULL")
     conn.commit()
 
 

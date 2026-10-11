@@ -117,15 +117,34 @@ def tag_items(conn):
     return len(rows)
 
 
-def cves_to_lookup(conn):
-    """CVE IDs never looked up, or looked up without a score more than a day ago.
-    Newest articles first, so today's news gets scored before the backlog."""
+def _window(since):
+    """SQL and parameters limiting items to those published since `since` (None: every item)."""
+    return ("", ()) if since is None else (" AND (published IS NULL OR published >= ?)", (since,))
+
+
+def _by_cve(conn, sql, cve_ids):
+    """{cve_id: row} from `sql`, which ends in "WHERE cve_id IN", for these CVEs only.
+    In chunks, since SQLite limits how many values one query can take."""
+    found, ids = {}, list(cve_ids)
+    for start in range(0, len(ids), 500):
+        chunk = ids[start:start + 500]
+        found.update((r["cve_id"], r) for r in conn.execute(f"{sql} ({','.join('?' * len(chunk))})", chunk))
+    return found
+
+
+def cves_to_lookup(conn, since=None):
+    """CVE IDs never looked up, or looked up without a score more than a day ago, from
+    articles published since `since` (None: every article). Newest articles first, so
+    today's news gets scored before the backlog."""
     now = datetime.now(timezone.utc)
-    cache = {r["cve_id"]: r for r in conn.execute("SELECT * FROM cve_cache")}
+    window, params = _window(since)
+    rows = conn.execute("SELECT id, cves, published FROM items WHERE cves != ''" + window, params).fetchall()
+    # Sorted here rather than with ORDER BY, which makes SQLite walk the whole date index to
+    # skip a sort. Same order as ORDER BY published DESC: newest first, undated last.
+    rows.sort(key=lambda r: (r["published"] or "", r["id"]), reverse=True)
+    cache = _by_cve(conn, "SELECT * FROM cve_cache WHERE cve_id IN",
+                    {c for row in rows for c in row["cves"].split(",")})
     wanted, seen = [], set()
-    rows = conn.execute(
-        "SELECT cves FROM items WHERE cves != '' ORDER BY published DESC"
-    ).fetchall()
     for row in rows:
         for cve_id in row["cves"].split(","):
             if cve_id in seen:
@@ -142,10 +161,10 @@ def cves_to_lookup(conn):
     return wanted
 
 
-def lookup_pending(conn):
+def lookup_pending(conn, since=None):
     key = api_key()
     pace = PACE_WITH_KEY if key else PACE_NO_KEY
-    pending = cves_to_lookup(conn)
+    pending = cves_to_lookup(conn, since)
     done = 0
 
     for cve_id in pending[: pace["budget"]]:
@@ -165,14 +184,17 @@ def lookup_pending(conn):
     return {"looked_up": done, "pending": len(pending) - done, "has_key": key is not None}
 
 
-def roll_up(conn):
-    """Copy CVE results onto items: highest score, and KEV if any CVE is flagged, either by NVD
-    or in CISA's own catalogue (vulns.py downloads it daily; NVD can take days to catch up).
-    Only items whose score or flag changed are written."""
-    cache = {r["cve_id"]: r for r in conn.execute("SELECT cve_id, cvss, kev FROM cve_cache")}
-    listed = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev")}
+def roll_up(conn, since=None):
+    """Copy CVE results onto items published since `since` (None: every item): highest score,
+    and KEV if any CVE is flagged, either by NVD or in CISA's own catalogue (vulns.py downloads
+    it daily; NVD can take days to catch up). Only items whose score or flag changed are written."""
+    window, params = _window(since)
+    rows = conn.execute("SELECT id, cves, cvss, kev FROM items WHERE cves != ''" + window, params).fetchall()
+    wanted = {c for row in rows for c in row["cves"].split(",")}
+    cache = _by_cve(conn, "SELECT cve_id, cvss, kev FROM cve_cache WHERE cve_id IN", wanted)
+    listed = set(_by_cve(conn, "SELECT cve_id FROM kev WHERE cve_id IN", wanted))
     changed = []
-    for row in conn.execute("SELECT id, cves, cvss, kev FROM items WHERE cves != ''").fetchall():
+    for row in rows:
         ids = row["cves"].split(",")
         hits = [cache[c] for c in ids if c in cache]
         scores = [h["cvss"] for h in hits if h["cvss"] is not None]
@@ -184,8 +206,9 @@ def roll_up(conn):
     conn.commit()
 
 
-def enrich(conn):
+def enrich(conn, since=None):
+    """since: only recheck articles published since then (None: every article)."""
     tag_items(conn)
-    stats = lookup_pending(conn)
-    roll_up(conn)
+    stats = lookup_pending(conn, since)
+    roll_up(conn, since)
     return stats

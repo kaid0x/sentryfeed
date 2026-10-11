@@ -81,10 +81,10 @@ def _split(text):
     return [part for part in text.split(",") if part]
 
 
-def rules_fingerprint():
-    """Changes whenever geo.py or stack.py does."""
+def rules_fingerprint(names=RULE_FILES):
+    """Changes whenever one of these files does (by default geo.py and stack.py)."""
     digest = hashlib.sha256()
-    for name in RULE_FILES:
+    for name in names:
         digest.update(Path(__file__).with_name(name).read_bytes())
     return digest.hexdigest()[:16]
 

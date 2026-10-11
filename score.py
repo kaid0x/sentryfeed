@@ -164,13 +164,16 @@ def _signals(item):
     return "yellow", "no severity signals"
 
 
-def score_all(conn):
-    """Rescore every item each run, so a CVSS score that arrives later, or a tweak to the
-    keyword lists, applies to old items too. Only items whose colour or reason changed are
-    written: otherwise every run would rewrite every article, and Turso counts each write."""
+def score_all(conn, since=None):
+    """Rescore the items published since `since`, or every item (None), so a CVSS score that
+    arrives later, or a tweak to the keyword lists, applies to old items too. Only items whose
+    colour or reason changed are written: otherwise every run would rewrite every article, and
+    Turso counts each write. Returns how many of the rescored items got each colour."""
     counts = Counter()
+    window, params = ("", ()) if since is None else (" WHERE published IS NULL OR published >= ?", (since,))
     rows = conn.execute(
-        "SELECT id, category, source, title, summary, cvss, kev, severity, severity_reason FROM items"
+        "SELECT id, category, source, title, summary, cvss, kev, severity, severity_reason FROM items" + window,
+        params,
     ).fetchall()
     changed = []
     for row in rows:
