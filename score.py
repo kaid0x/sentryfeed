@@ -165,19 +165,20 @@ def _signals(item):
 
 
 def score_all(conn):
-    """Rescore every item each run: cheap at this size, and it means a CVSS score
-    that arrives later, or a tweak to the keyword lists, applies to old items too."""
+    """Rescore every item each run, so a CVSS score that arrives later, or a tweak to the
+    keyword lists, applies to old items too. Only items whose colour or reason changed are
+    written: otherwise every run would rewrite every article, and Turso counts each write."""
     counts = Counter()
     rows = conn.execute(
-        "SELECT id, category, source, title, summary, cvss, kev FROM items"
+        "SELECT id, category, source, title, summary, cvss, kev, severity, severity_reason FROM items"
     ).fetchall()
+    changed = []
     for row in rows:
         colour, reason = classify(row)
         counts[colour] += 1
-        conn.execute(
-            "UPDATE items SET severity = ?, severity_reason = ? WHERE id = ?",
-            (colour, reason, row["id"]),
-        )
+        if (colour, reason) != (row["severity"], row["severity_reason"]):
+            changed.append((colour, reason, row["id"]))
+    conn.executemany("UPDATE items SET severity = ?, severity_reason = ? WHERE id = ?", changed)
     conn.commit()
     return counts
 

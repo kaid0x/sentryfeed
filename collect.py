@@ -71,8 +71,8 @@ def main():
     # group the stories themselves, as before.
     try:
         started = time.monotonic()
-        saved = save_story_groups(conn)
-        print(f"Story groups: {saved} windows saved in {time.monotonic() - started:.1f}s")
+        changed, windows = save_story_groups(conn)
+        print(f"Story groups: {changed} of {windows} windows changed, in {time.monotonic() - started:.1f}s")
     except Exception as e:
         print(f"Story groups: failed ({e.__class__.__name__}: {e})")
 

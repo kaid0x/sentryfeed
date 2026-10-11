@@ -199,9 +199,19 @@ def saved(conn, key):
     return json.loads(zlib.decompress(row[0])) if row else None
 
 
+def _packed(stories):
+    """A window's stories as saved: compressed JSON, about 4.5 times smaller, which matters
+    once every run is copied to Turso. Without the "5m ago" ages, which pages work out on
+    each visit anyway, so a window that hasn't changed packs to the same bytes."""
+    for story in stories:
+        for s in (story, *story["also"]):
+            s["age"] = ""
+    return zlib.compress(json.dumps(stories).encode())
+
+
 def save_all(conn):
-    """Group every window the pages use and save the results, replacing the last run's.
-    Run by the collector after scoring. Returns how many windows were saved."""
+    """Group every window the pages use and save the ones that changed since the last run.
+    Run by the collector after scoring. Returns (windows changed, windows in all)."""
     now = datetime.now(timezone.utc)
     windows = {days_key(d): {"days": d} for d in SAVED_DAYS}
     windows[GULF_KEY] = {"days": gulf_days(first_published(conn), now), "gulf_only": True}
@@ -210,11 +220,14 @@ def save_all(conn):
         start = current - timedelta(days=7 * back)
         windows[week_key(start)] = {"start": start, "end": start + timedelta(days=7)}
 
-    made_at = now.isoformat()
-    # Compressed: about 4.5 times smaller, which matters once every run is copied to Turso.
-    rows = [(key, FORMAT, zlib.compress(json.dumps(group(conn, **window)).encode()), made_at)
-            for key, window in windows.items()]
+    stored = {key: (fmt, blob) for key, fmt, blob in conn.execute("SELECT key, format, stories FROM story_groups")}
+    changed = []
+    for key, window in windows.items():
+        packed = _packed(group(conn, **window))
+        if stored.get(key) != (FORMAT, packed):
+            changed.append((key, FORMAT, packed, now.isoformat()))
     with conn:      # one transaction: pages see the old set or the new one, never half
-        conn.execute("DELETE FROM story_groups")
-        conn.executemany("INSERT INTO story_groups (key, format, stories, made_at) VALUES (?, ?, ?, ?)", rows)
-    return len(rows)
+        conn.executemany("DELETE FROM story_groups WHERE key = ?", [(k,) for k in stored if k not in windows])
+        conn.executemany("INSERT OR REPLACE INTO story_groups (key, format, stories, made_at) VALUES (?, ?, ?, ?)",
+                         changed)
+    return len(changed), len(windows)

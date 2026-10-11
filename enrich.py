@@ -157,18 +157,20 @@ def lookup_pending(conn):
 
 def roll_up(conn):
     """Copy CVE results onto items: highest score, and KEV if any CVE is flagged, either by NVD
-    or in CISA's own catalogue (vulns.py downloads it daily; NVD can take days to catch up)."""
+    or in CISA's own catalogue (vulns.py downloads it daily; NVD can take days to catch up).
+    Only items whose score or flag changed are written."""
     cache = {r["cve_id"]: r for r in conn.execute("SELECT cve_id, cvss, kev FROM cve_cache")}
     listed = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev")}
-    for row in conn.execute("SELECT id, cves FROM items WHERE cves != ''").fetchall():
+    changed = []
+    for row in conn.execute("SELECT id, cves, cvss, kev FROM items WHERE cves != ''").fetchall():
         ids = row["cves"].split(",")
         hits = [cache[c] for c in ids if c in cache]
         scores = [h["cvss"] for h in hits if h["cvss"] is not None]
         kev = any(h["kev"] for h in hits) or any(c in listed for c in ids)
-        conn.execute(
-            "UPDATE items SET cvss = ?, kev = ? WHERE id = ?",
-            (max(scores) if scores else None, int(kev), row["id"]),
-        )
+        cvss = max(scores) if scores else None
+        if (cvss, int(kev)) != (row["cvss"], row["kev"]):
+            changed.append((cvss, int(kev), row["id"]))
+    conn.executemany("UPDATE items SET cvss = ?, kev = ? WHERE id = ?", changed)
     conn.commit()
 
 

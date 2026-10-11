@@ -59,22 +59,26 @@ def _due(conn, key):
 # ---------- Daily refresh (collector) ----------
 
 def refresh_kev(conn):
-    """Replace the KEV table with CISA's current catalogue. Returns how many were new."""
+    """Bring the KEV table in line with CISA's current catalogue, writing only flaws that are
+    new, changed or removed (it barely changes from day to day). Returns how many were new."""
     resp = requests.get(KEV_URL, headers={"User-Agent": USER_AGENT}, timeout=30)
     resp.raise_for_status()
     rows = resp.json()["vulnerabilities"]
     before = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev")}
-    with conn:
-        conn.execute("DELETE FROM kev")
-        conn.executemany(
-            """INSERT OR REPLACE INTO kev (cve_id, vendor, product, name, description, date_added, due_date,
-                                           required_action, ransomware, notes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            [(v["cveID"].upper(), v.get("vendorProject") or "", v.get("product") or "",
+    fresh = [(v["cveID"].upper(), v.get("vendorProject") or "", v.get("product") or "",
               v.get("vulnerabilityName") or v["cveID"], v.get("shortDescription"), v["dateAdded"],
               v.get("dueDate"), v.get("requiredAction"), int(v.get("knownRansomwareCampaignUse") == "Known"),
-              v.get("notes")) for v in rows if normalise(v.get("cveID"))],
+              v.get("notes")) for v in rows if normalise(v.get("cveID"))]
+    columns = ("vendor", "product", "name", "description", "date_added", "due_date", "required_action",
+               "ransomware", "notes")
+    with conn:
+        conn.executemany(
+            f"""INSERT INTO kev (cve_id, {", ".join(columns)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cve_id) DO UPDATE SET {", ".join(f"{c} = excluded.{c}" for c in columns)}
+                WHERE ({", ".join(columns)}) IS NOT ({", ".join(f"excluded.{c}" for c in columns)})""",
+            fresh,
         )
+        conn.executemany("DELETE FROM kev WHERE cve_id = ?", [(c,) for c in before - {row[0] for row in fresh}])
     set_meta(conn, "kev_fetched", datetime.now(timezone.utc).isoformat())
     return len({normalise(v["cveID"]) for v in rows} - before) if before else 0
 

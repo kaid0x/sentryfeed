@@ -240,7 +240,8 @@ _INTERNATIONAL = [
 def ensure_international(conn):
     conn.executemany(
         """INSERT INTO companies (cik, ticker, name, exchange) VALUES (?, ?, ?, ?)
-           ON CONFLICT(cik) DO UPDATE SET ticker = excluded.ticker, name = excluded.name, exchange = excluded.exchange""",
+           ON CONFLICT(cik) DO UPDATE SET ticker = excluded.ticker, name = excluded.name, exchange = excluded.exchange
+           WHERE (ticker, name, exchange) IS NOT (excluded.ticker, excluded.name, excluded.exchange)""",
         [(cik, ticker, name, ex) for cik, ex, ticker, name, _ in _INTERNATIONAL],
     )
     conn.commit()
@@ -369,7 +370,8 @@ def refresh_companies(conn, contact):
     conn.executemany(
         """INSERT INTO companies (cik, ticker, name, exchange) VALUES (?, ?, ?, ?)
            ON CONFLICT(cik) DO UPDATE SET ticker = excluded.ticker, name = excluded.name,
-                                          exchange = excluded.exchange""",
+                                          exchange = excluded.exchange
+           WHERE (ticker, name, exchange) IS NOT (excluded.ticker, excluded.name, excluded.exchange)""",
         rows,
     )
     conn.execute("CREATE TEMP TABLE IF NOT EXISTS listed (cik INTEGER PRIMARY KEY)")
@@ -507,7 +509,8 @@ def _us_victims(title, names, taken):
 
 
 def find_events(conn):
-    """Rebuild stock_events from the last LOOKBACK_DAYS of security stories."""
+    """Bring stock_events in line with the last LOOKBACK_DAYS of security stories, writing
+    only the mentions that appeared or went away."""
     names = load_names(conn)
     cutoff = (datetime.now(timezone.utc) - timedelta(days=LOOKBACK_DAYS)).isoformat()
     rows = conn.execute(
@@ -516,9 +519,10 @@ def find_events(conn):
               AND published >= ?""",
         (*SECURITY_SEVERITIES, cutoff),
     ).fetchall()
-    events = [(row["id"], cik, matched) for row in rows for cik, _, _, matched in victims(row["title"], names)]
-    conn.execute("DELETE FROM stock_events")
-    conn.executemany("INSERT INTO stock_events (item_id, cik, matched) VALUES (?, ?, ?)", events)
+    events = {(row["id"], cik, matched) for row in rows for cik, _, _, matched in victims(row["title"], names)}
+    stored = {tuple(r) for r in conn.execute("SELECT item_id, cik, matched FROM stock_events")}
+    conn.executemany("DELETE FROM stock_events WHERE item_id = ? AND cik = ? AND matched = ?", stored - events)
+    conn.executemany("INSERT OR REPLACE INTO stock_events (item_id, cik, matched) VALUES (?, ?, ?)", events - stored)
     conn.commit()
     return len(events)
 

@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS story_groups (
     key         TEXT PRIMARY KEY,           -- 'days:7', or 'week:' and the Monday it starts
     format      INTEGER NOT NULL,           -- grouping.FORMAT when saved; pages ignore other versions
     stories     BLOB NOT NULL,              -- zlib-compressed JSON list, one entry per story
-    made_at     TEXT NOT NULL
+    made_at     TEXT NOT NULL               -- when this window last changed
 );
 CREATE TABLE IF NOT EXISTS meta (           -- small facts about the database, like when the collector last ran
     key         TEXT PRIMARY KEY,
