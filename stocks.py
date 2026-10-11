@@ -320,7 +320,7 @@ def short_name(legal_name):
 
 def _setting(env_name, path):
     """An environment variable, or the file the Pi keeps it in, or None."""
-    value = os.environ.get(env_name) or (path.read_text().strip() if path.exists() else "")
+    value = os.environ.get(env_name, "").strip() or (path.read_text().strip() if path.exists() else "")
     return value or None
 
 

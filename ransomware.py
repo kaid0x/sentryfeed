@@ -40,7 +40,7 @@ COUNT_VERSION = "2"
 
 
 def api_key():
-    key = os.environ.get("RANSOMWARE_LIVE_KEY")
+    key = os.environ.get("RANSOMWARE_LIVE_KEY", "").strip()
     if not key and KEY_FILE.exists():
         key = KEY_FILE.read_text().strip()
     return key or None

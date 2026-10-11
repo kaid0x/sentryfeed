@@ -28,7 +28,7 @@ class RateLimited(Exception):
 
 
 def api_key():
-    key = os.environ.get("NVD_API_KEY")
+    key = os.environ.get("NVD_API_KEY", "").strip()
     if not key and KEY_FILE.exists():
         key = KEY_FILE.read_text().strip()
     return key or None

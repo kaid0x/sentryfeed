@@ -257,13 +257,15 @@ def connect(setup=None):
     to the local sentryfeed.db. `setup` creates missing tables, columns and indexes: the
     collector always asks for it, and by default only a local file gets it, since on Turso
     each statement is a network round trip and pages would pay for it on every visit."""
-    url = os.environ.get("TURSO_DATABASE_URL")
+    # Stripped: a value pasted into a settings form often brings a newline with it.
+    url = os.environ.get("TURSO_DATABASE_URL", "").strip()
     if url:
         if turso_serverless is None:
             raise RuntimeError("TURSO_DATABASE_URL is set but turso-serverless isn't installed")
         if socket.getdefaulttimeout() is None:
             socket.setdefaulttimeout(TURSO_TIMEOUT)
-        conn = _TursoConnection(_TursoSession(url, auth_token=os.environ.get("TURSO_AUTH_TOKEN")))
+        token = os.environ.get("TURSO_AUTH_TOKEN", "").strip() or None
+        conn = _TursoConnection(_TursoSession(url, auth_token=token))
         conn.row_factory = turso_serverless.Row
     else:
         conn = sqlite3.connect(DB_PATH)

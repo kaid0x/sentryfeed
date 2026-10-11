@@ -30,8 +30,8 @@ def load_secret():
     """FLASK_SECRET_KEY from the environment (Vercel), or a random key made on first run and
     kept in .flask_secret (never committed). O_EXCL means two gunicorn workers starting at
     once can't each make a different key."""
-    if os.environ.get("FLASK_SECRET_KEY"):
-        return os.environ["FLASK_SECRET_KEY"]
+    if os.environ.get("FLASK_SECRET_KEY", "").strip():
+        return os.environ["FLASK_SECRET_KEY"].strip()
     if os.environ.get("VERCEL"):
         # Vercel's files are read-only, and a key made per instance would differ between them.
         raise RuntimeError("Set FLASK_SECRET_KEY in the Vercel project's environment variables")
