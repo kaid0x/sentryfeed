@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
 {% set active = "stack" %}
 
 {% block title %}My stack · SentryFeed{% endblock %}
@@ -45,6 +46,19 @@
   .kev-tag { color: var(--red); border: 1px solid var(--red); border-radius: 3px; padding: 0 4px; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .chip { font: 11.5px var(--mono); color: var(--blue); border: 1px solid var(--blue); border-radius: 999px; padding: 1px 8px; }
+  .chip.word { border-style: dashed; }
+  .left { display: grid; gap: 16px; }
+  .hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; line-height: 1.5; }
+  .hint code { font: 12.5px var(--mono); color: var(--text); }
+  .watch-form { display: flex; gap: 8px; margin: 0 0 4px; }
+  .watch-form .search { margin: 0; flex: 1; min-width: 0; min-height: 44px; }
+  .add-btn { min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel-hover); color: var(--text); font: 600 14px var(--sans); cursor: pointer; }
+  .add-btn:hover { border-color: var(--muted); }
+  .words { list-style: none; margin: 10px 0 12px; padding: 0; display: grid; gap: 4px; }
+  .words li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 8px; border: 1px solid var(--line); border-radius: 6px; font-size: 14px; overflow-wrap: anywhere; }
+  .remove { min-height: 44px; min-width: 44px; background: none; border: 0; color: var(--muted); font: 12.5px var(--mono); cursor: pointer; text-decoration: underline; }
+  .remove:hover { color: var(--text); }
+  .loading { font: 12.5px var(--mono); color: var(--muted); margin: 0 0 10px; }
   .why { font: 11.5px var(--mono); color: var(--muted); margin-top: 4px; }
   .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 24px 18px; color: var(--muted); }
   .empty strong { color: var(--text); }
@@ -61,9 +75,10 @@
 <main class="page">
   <div class="page-inner">
     <h1>My stack</h1>
-    <p class="lede">Tick the products your company runs, and see only the stories about them: new flaws, attacks and anything CISA has confirmed is being exploited. <strong>Your choices stay in this browser.</strong> They're never sent to SentryFeed or anywhere else. The feed also gets a "My stack" filter.</p>
+    <p class="lede">Tick the products your company runs, add your own watch words, and see only the stories about them: new flaws, attacks and anything CISA has confirmed is being exploited. <strong>Your choices stay in this browser.</strong> They're never sent to SentryFeed or anywhere else. The feed and the front page use them too.</p>
 
     <div class="layout">
+      <div class="left">
       <section class="picker" aria-labelledby="picker-title">
         <div class="picker-head">
           <h2 id="picker-title">Products</h2>
@@ -90,14 +105,32 @@
         <p class="warn" id="no-storage" hidden>This browser isn't letting the page save your choices, so they'll reset when you leave.</p>
       </section>
 
+      <section class="picker" aria-labelledby="watch-title">
+        <div class="picker-head">
+          <h2 id="watch-title">Watch words</h2>
+          <span class="picked" id="watch-count" aria-live="polite">none</span>
+        </div>
+        <p class="hint">Your company, a supplier, or a product that isn't in the list, like <code>Odoo</code> or <code>Emirates NBD</code>. Whole words only. Type in lowercase to ignore capitals; use capitals, like <code>SAP</code>, to match them exactly.</p>
+        <form class="watch-form" id="watch-form">
+          <label class="sr-only" for="watch-input">Add a watch word</label>
+          <input class="search" id="watch-input" type="text" maxlength="60" autocomplete="off" spellcheck="false" placeholder="e.g. Odoo">
+          <button class="add-btn" type="submit">Add</button>
+        </form>
+        <p class="warn" id="watch-error" role="alert" hidden></p>
+        <ul class="words" id="words" aria-label="Your watch words"></ul>
+        <p class="privacy">Saved in this browser only, like your products. The RSS and calendar links never include them.</p>
+      </section>
+      </div>
+
       <section class="results" aria-labelledby="results-title">
         <div class="results-head">
           <h2 id="results-title">About your stack, last {{ days }} days</h2>
           <span class="summary-line" id="summary" aria-live="polite"></span>
         </div>
+        <p class="loading" id="watch-status" aria-live="polite" hidden></p>
         <ul class="stories" id="stories"></ul>
-        <p class="empty" id="empty-none">Pick the products your company runs on the left, and stories about them appear here. Nothing you pick leaves this browser.</p>
-        <p class="empty" id="empty-quiet" hidden><strong>Nothing about your stack in the last {{ days }} days.</strong> No new flaws or attacks reported for the products you picked.</p>
+        <p class="empty" id="empty-none">Pick the products your company runs, or add watch words, and stories about them appear here. Nothing you pick leaves this browser.</p>
+        <p class="empty" id="empty-quiet" hidden><strong>Nothing about your stack in the last {{ days }} days.</strong> No new flaws or attacks reported for the products and words you picked.</p>
         <noscript><p class="empty">My stack runs in your browser, so it needs JavaScript turned on.</p></noscript>
       </section>
     </div>
@@ -113,6 +146,7 @@
   const LABELS = {{ dict(severities) | tojson }};
   const KEY = "sentryfeed.stack";
   const $ = (id) => document.getElementById(id);
+{{ ui.watch_js() }}
 
   // Choices live in localStorage only. If the browser blocks it, the page still
   // works for this visit and says so.
@@ -126,8 +160,14 @@
     catch (e) { canSave = false; }
     $("no-storage").hidden = canSave;
   }
+  function saveWords() {
+    try { localStorage.setItem(WATCH_KEY, JSON.stringify(words)); }
+    catch (e) { canSave = false; }
+    $("no-storage").hidden = canSave;
+  }
 
   const chosen = load();
+  const words = watchLoad();
   $("no-storage").hidden = canSave;
   const boxes = document.querySelectorAll('#groups input[type="checkbox"]');
   boxes.forEach((box) => { box.checked = chosen.has(box.value); });
@@ -139,13 +179,51 @@
     return n;
   }
 
+  // Watch words need every security story, not only those naming a catalogue product:
+  // fetched once, the first time there are words. No words are sent with the request.
+  let all = null, watchState = "idle";        // idle, loading, ready, failed
+  function needAll() {
+    if (!words.length || watchState === "loading" || watchState === "ready") return;
+    watchState = "loading";
+    fetch("/api/watch", { headers: { Accept: "application/json" } })
+      .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((data) => { all = data; watchState = "ready"; render(); })
+      .catch(() => { watchState = "failed"; render(); });
+  }
+
+  function renderWords() {
+    $("watch-count").textContent = words.length ? words.length + " of " + WATCH_MAX : "none";
+    $("words").replaceChildren(...words.map((w) => {
+      const li = el("li");
+      const b = el("button", "remove", "Remove");
+      b.type = "button";
+      b.setAttribute("aria-label", "Remove " + w);
+      b.addEventListener("click", () => {
+        words.splice(words.indexOf(w), 1);
+        saveWords();
+        renderWords();
+        render();
+        $("watch-input").focus();
+      });
+      li.append(el("span", "", w), b);
+      return li;
+    }));
+  }
+
   function render() {
     $("picked").textContent = chosen.size ? chosen.size + " picked" : "none picked";
-    const matches = STORIES.filter((s) => s.products.some((p) => chosen.has(p)));
+    const match = watchMatcher(words);
+    const pool = all || STORIES;
+    const matches = [];
+    for (const s of pool) {
+      const products = s.products.filter((p) => chosen.has(p));
+      const found = all ? match(watchText(s)) : [];
+      if (products.length || found.length) matches.push({ s, products, found });
+    }
     const list = $("stories");
-    list.replaceChildren(...matches.map((s) => {
+    list.replaceChildren(...matches.map(({ s, products, found }) => {
       const li = el("li", "story sev-" + s.severity);
-      const a = el("a", "title", s.title + (s.link ? " ↗" : ""));
+      const a = el("a", "title", s.title + (s.link ? " \u2197" : ""));
       if (s.link) { a.href = s.link; a.target = "_blank"; a.rel = "noopener noreferrer"; }
       const meta = el("div", "meta");
       meta.append(el("span", "sev-tag", LABELS[s.severity]), el("span", "", s.source));
@@ -153,21 +231,47 @@
       if (s.kev) meta.append(el("span", "kev-tag", "KEV"));
       if (s.sources > 1) meta.append(el("span", "", "+" + (s.sources - 1) + (s.sources > 2 ? " sources" : " source")));
       const chips = el("div", "chips");
-      s.products.filter((p) => chosen.has(p)).forEach((p) => chips.append(el("span", "chip", NAMES[p])));
+      products.forEach((p) => chips.append(el("span", "chip", NAMES[p])));
+      found.forEach((w) => chips.append(el("span", "chip word", "\u201c" + w + "\u201d")));
       li.append(a, meta, el("div", "why", s.severity_reason), chips);
       return li;
     }));
-    const exploited = matches.filter((s) => s.kev || s.severity === "red").length;
+    const exploited = matches.filter(({ s }) => s.kev || s.severity === "red").length;
     const summary = $("summary");
     summary.replaceChildren();
-    if (chosen.size && matches.length) {
+    const anything = chosen.size > 0 || words.length > 0;
+    if (anything && matches.length) {
       const n = el("strong", "", String(matches.length));
       summary.append(n, matches.length === 1 ? " story" : " stories");
       if (exploited) summary.append(" · ", el("strong", "", String(exploited)), " Major");
     }
-    $("empty-none").hidden = chosen.size > 0;
-    $("empty-quiet").hidden = !(chosen.size > 0 && matches.length === 0);
+    const status = $("watch-status");
+    const waiting = words.length > 0 && watchState === "loading";
+    status.hidden = !(words.length && (watchState === "loading" || watchState === "failed"));
+    status.textContent = watchState === "failed"
+      ? "Couldn't load the stories to check your watch words. Reload to try again."
+      : "Checking your watch words\u2026";
+    $("empty-none").hidden = anything;
+    $("empty-quiet").hidden = !(anything && matches.length === 0 && !waiting && watchState !== "failed");
+    needAll();
   }
+
+  $("watch-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const input = $("watch-input");
+    const word = watchClean(input.value);
+    const problem = watchProblem(word, words);
+    const error = $("watch-error");
+    error.hidden = !problem;
+    error.textContent = problem || "";
+    if (problem) return;
+    words.push(word);
+    saveWords();
+    input.value = "";
+    renderWords();
+    render();
+  });
+  renderWords();
 
   $("groups").addEventListener("change", (e) => {
     if (e.target.type !== "checkbox") return;

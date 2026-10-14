@@ -20,7 +20,7 @@ The same story from several outlets is shown once, with the other outlets listed
 
 - **The day in one sentence:** Major stories, stories about flaws on CISA's exploited list, and breached listed companies, all in the last 24 hours.
 - **Top stories:** the five most important from the last 24 hours, ranked by severity, then CISA listing, then how many outlets covered them. The first leads with its summary. Microsoft publishes one advisory per flaw, often dozens a day, so they're grouped into a single item ("Microsoft: 33 security advisories in the last 24 hours") with the most serious listed.
-- **Your stack:** if you've picked products on `/stack`, a strip shows recent stories about them. The list stays in your browser, as on the My stack page.
+- **Your stack:** if you've picked products or added watch words on `/stack`, a strip shows recent stories about them. Both stay in your browser, as on the My stack page.
 - **Being exploited now:** the week's stories about flaws on CISA's list, or that say a flaw is already being used.
 - **In the Gulf:** stories from the regional sources and any story naming a GCC country, with a map of the Gulf. The regional feeds carry a lot of vendor announcements, so their stories only appear when they're serious or about an incident, a flaw or the authorities, and the section says how many it left out.
 - **Markets**, **Where it happened** (a small map leading to `/map`), **Coming up** (approved events) and the planned weekly digest.
@@ -255,6 +255,16 @@ For the US:
 
 Matching is case-sensitive on product names, nicknames and parts ("CitrixBleed" is NetScaler, "PAN-OS" is Palo Alto, "Atlassian flaw" counts for Confluence and Jira). Faked brands ("fake Cloudflare checks") and research teams ("Cisco Talos finds…") don't count, and tech news and events aren't tagged. Run `python stack.py` to see which stories match which products.
 
+**Watch words** cover what the product list can't: your company or bank, a supplier, or a product that isn't in the catalogue (`Odoo`, `Emirates NBD`, `SAP`). Up to 20 words or phrases of 3 to 40 characters, saved in the browser's local storage next to the products and never sent anywhere; the RSS and calendar links don't include them. They're matched in the browser against the headline and the first 400 characters of the summary, like products, and only in security stories:
+
+- **Whole words only:** `SAP` matches "SAP patches" but not "SAPPHIRE" or "SAP2"; the edges are Unicode letters and digits, so Arabic words work too.
+- **Smart capitals:** a word typed all in lowercase ignores capitals (`odoo` finds "Odoo" and "ODOO"); one with a capital must match exactly (`Exchange` the Microsoft server, not "data exchange").
+- Spaces in a phrase match any spacing, symbols (`AT&T`, `C++`) are taken literally, and a phrase can't match across the end of the headline and the start of the summary.
+
+The feed already holds every story's text, so its My stack button simply includes watch words. My stack and the front page only carry stories that name a catalogue product, so with watch words saved they fetch `/api/watch`, every security story of the last 14 days with the start of its summary (about 46 KB compressed). The request carries no words, and visitors without watch words never make it, so the pages stay the size they were. If it fails, the page says it couldn't check the words rather than showing "0 stories".
+
+Tested: 27 matching cases in Node (whole words, smart capitals, Arabic, symbols, the 400-character limit, bad saved data); the endpoint on the live database (security stories only, links http(s), every story included); and in a browser, adding, refusing and removing words on My stack, the front page strip and the feed filter agreeing (7 stories for one word), a failed request, and the phone layout.
+
 ## Events
 
 `/events` lists cybersecurity events (CTFs, webinars, conferences, meetups, workshops) submitted through `/events/submit` by the people running them. Events starting in the next two weeks also appear under the feed's blue Events tile.
@@ -391,7 +401,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
 - A domain security check: SPF, DMARC, DKIM, MX, MTA-STS and TLS-RPT (encrypted mail delivery; a direct STARTTLS test needs port 25, which cloud hosts block), HTTPS redirect, HSTS, certificate expiry, security.txt, DNSSEC and CAA for a domain you enter, shown as "X of Y in place" rather than a grade, with shareable result links. DKIM can't be listed from outside, so it tries about 40 selector names that mail services use, guards against domains that answer every name, and takes a selector typed in (the email header tool will show it). Through DNS-over-HTTPS, refusing private and local addresses, rate-limited with a counter in the database, with short timeouts.
 - "Learn this": stories link the kind of weakness behind them (its CWE, from NVD) to free hands-on labs, plus a page of labs matching this week's attacks.
-- Custom watch words in My stack: your own words to flag in headlines, kept in your browser like the rest of My stack.
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.

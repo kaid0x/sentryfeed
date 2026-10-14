@@ -371,6 +371,12 @@ def world_map():
 
 STACK_DAYS = 14
 STACK_FIELDS = ("title", "link", "source", "age", "severity", "severity_reason", "kev", "products")
+WATCH_TEXT_CHARS = 400      # the start of a summary watch words are matched in, as for products (stack.match)
+
+
+def stack_entry(s):
+    return {**{k: s[k] for k in STACK_FIELDS}, "title": s["headline"], "severity_reason": s["reason"],
+            "sources": 1 + len(s["also"])}
 
 
 @app.route("/stack")
@@ -380,11 +386,22 @@ def my_stack():
         "stack.html",
         catalog=stack.catalog(),
         names=stack.NAMES,
-        stories=[{**{k: s[k] for k in STACK_FIELDS}, "title": s["headline"], "severity_reason": s["reason"],
-                  "sources": 1 + len(s["also"])} for s in stories],
+        stories=[stack_entry(s) for s in stories],
         days=STACK_DAYS,
         severities=SEVERITIES,
     )
+
+
+@app.route("/api/watch")
+def api_watch():
+    """Every security story of the last STACK_DAYS days, with the start of its summary, for watch
+    words. My stack and the front page fetch it only when the visitor has saved watch words, so
+    other visitors don't download it; the request carries no words, which stay in the browser."""
+    stories = [s for s in load_items(STACK_DAYS) if s["severity"] in stack.SECURITY_SEVERITIES]
+    resp = jsonify([{**stack_entry(s), "link": safe_link(s["link"]),
+                     "text": (s.get("summary") or "")[:WATCH_TEXT_CHARS]} for s in stories])
+    resp.headers["Cache-Control"] = "public, max-age=300"
+    return resp
 
 
 @app.route("/events")

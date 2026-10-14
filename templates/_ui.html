@@ -116,8 +116,56 @@
 </script>
 {% endmacro %}
 
+{# Watch words (My stack): the visitor's own words, kept in this browser like the products and
+   never sent anywhere. Plain JavaScript for inside a page's own script. Whole words only;
+   "smart case": a word typed all in lowercase ignores capitals, one with a capital matches
+   exactly ("SAP", not "sap" in a sentence). #}
+{% macro watch_js() %}
+  const WATCH_KEY = "sentryfeed.watch", WATCH_MAX = 20, WATCH_MIN = 3, WATCH_LONGEST = 40;
+  // A word as it's stored: control characters removed, spaces collapsed, trimmed. null if it
+  // breaks a rule; the reason is in watchProblem().
+  function watchClean(raw) {
+    return String(raw).normalize("NFC").replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/gu, " ").trim();
+  }
+  function watchProblem(word, words) {
+    const n = [...word].length;
+    if (!n) return "Type a word first.";
+    if (n < WATCH_MIN || n > WATCH_LONGEST) return "Use " + WATCH_MIN + " to " + WATCH_LONGEST + " characters.";
+    if (!/[\p{L}\p{N}]/u.test(word)) return "Include at least one letter or number.";
+    if (words.includes(word)) return "You're already watching that.";
+    if (words.length >= WATCH_MAX) return "You can watch up to " + WATCH_MAX + " words. Remove one to add another.";
+    return null;
+  }
+  function watchLoad() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(WATCH_KEY) || "[]");
+      if (!Array.isArray(raw)) return [];
+      const words = [];
+      for (const w of raw) {
+        if (typeof w !== "string") continue;
+        const clean = watchClean(w);
+        if (!watchProblem(clean, words)) words.push(clean);
+      }
+      return words;
+    } catch (e) { return []; }
+  }
+  function watchMatcher(words) {
+    const tests = words.map((w) => {
+      const body = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+");
+      const flags = w === w.toLowerCase() ? "iu" : "u";
+      return [w, new RegExp("(?<![\\p{L}\\p{N}_])" + body + "(?![\\p{L}\\p{N}_])", flags)];
+    });
+    return (text) => tests.filter(([, re]) => re.test(text || "")).map(([w]) => w);
+  }
+  // The text a word is looked for in: the headline and the start of the summary (400
+  // characters, as for products). The "|" stops a phrase matching across the two.
+  const watchText = (s) => (s.headline || s.title || "") + " | " +
+    (s.text !== undefined ? s.text : (s.summary || "").slice(0, 400));
+{% endmacro %}
+
 {# "Your stack": the saved products never leave the browser. The page already holds every
-   story from the last 14 days that names a catalogue product, and this picks the matches. #}
+   story from the last 14 days that names a catalogue product, and this picks the matches.
+   With watch words saved, it also fetches /api/watch (every security story, no words sent). #}
 {% macro stack_script(data, limit=3) %}
 <script nonce="{{ csp_nonce }}">
 (function () {
@@ -125,17 +173,65 @@
   if (!out) return;
   const STORIES = {{ data.stack_stories | tojson }};
   const NAMES = {{ data.stack_names | tojson }};
+{{ watch_js() }}
   let saved = [];
   try { saved = JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES); }
   catch (e) { saved = []; }
+  const words = watchLoad();
+  const mine = new Set(saved);
+  const match = watchMatcher(words);
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
     if (text !== undefined) node.textContent = text;
     return node;
   };
-  out.replaceChildren();
-  if (!saved.length) {
+
+  // pool: the stories to look in; note: a line about the watch words' stories, if any.
+  function render(pool, note) {
+    out.replaceChildren();
+    const hits = [];
+    for (const s of pool) {
+      const products = s.products.filter((p) => mine.has(p)).map((p) => NAMES[p]);
+      const found = s.text !== undefined ? match(watchText(s)) : [];
+      if (products.length || found.length) hits.push({ s, why: [...products, ...found.map((w) => "\u201c" + w + "\u201d")] });
+    }
+    // Loading or failed with nothing found yet: "0 stories" would be a claim we can't make.
+    if (note && !hits.length) { out.append(el("p", "stack-note", note)); return; }
+    const head = el("p", "stack-head");
+    head.append(el("strong", "stack-count", String(hits.length)),
+                hits.length === 1 ? " story in the last 14 days about your stack" :
+                                    " stories in the last 14 days about your stack");
+    out.append(head);
+    if (!hits.length) head.append(". Nothing to act on.");
+    if (hits.length) {
+      const list = el("ul", "stack-list");
+      hits.slice(0, {{ limit }}).forEach(({ s, why }) => {
+        const li = el("li", "stack-item sev-" + s.severity);
+        li.append(el("span", "stack-products", why.join(", ")));
+        if (s.link) {
+          const a = el("a", null, s.title);
+          a.href = s.link;
+          a.rel = "noopener noreferrer";
+          li.append(a);
+        } else {
+          li.append(el("span", null, s.title));
+        }
+        li.append(el("span", "stack-age", s.age));
+        list.append(li);
+      });
+      out.append(list);
+    }
+    if (note) out.append(el("p", "stack-note", note));
+    if (hits.length > {{ limit }}) {
+      const more = el("a", "stack-more", "All " + hits.length + " in My stack");
+      more.href = "/stack";
+      out.append(more);
+    }
+  }
+
+  if (!saved.length && !words.length) {
+    out.replaceChildren();
     const p = el("p", "stack-invite");
     const a = el("a", null, "Pick the products your company runs");
     a.href = "/stack";
@@ -143,39 +239,13 @@
     out.append(p);
     return;
   }
-  const mine = new Set(saved);
-  const hits = STORIES.filter((s) => s.products.some((p) => mine.has(p)));
-  const head = el("p", "stack-head");
-  const count = el("strong", "stack-count", String(hits.length));
-  head.append(count, hits.length === 1 ? " story in the last 14 days about products you run" :
-                                          " stories in the last 14 days about products you run");
-  out.append(head);
-  if (!hits.length) {
-    head.append(" (" + saved.length + " saved). Nothing to act on.");
-    return;
-  }
-  const list = el("ul", "stack-list");
-  hits.slice(0, {{ limit }}).forEach((s) => {
-    const li = el("li", "stack-item sev-" + s.severity);
-    const products = s.products.filter((p) => mine.has(p)).map((p) => NAMES[p]).join(", ");
-    li.append(el("span", "stack-products", products));
-    if (s.link) {
-      const a = el("a", null, s.title);
-      a.href = s.link;
-      a.rel = "noopener noreferrer";
-      li.append(a);
-    } else {
-      li.append(el("span", null, s.title));
-    }
-    li.append(el("span", "stack-age", s.age));
-    list.append(li);
-  });
-  out.append(list);
-  if (hits.length > {{ limit }}) {
-    const more = el("a", "stack-more", "All " + hits.length + " in My stack");
-    more.href = "/stack";
-    out.append(more);
-  }
+  if (!words.length) { render(STORIES, null); return; }
+  // Watch words need every security story, not just those naming a catalogue product.
+  render(STORIES, "Checking your watch words\u2026");
+  fetch("/api/watch", { headers: { Accept: "application/json" } })
+    .then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then((all) => render(all, null))
+    .catch(() => render(STORIES, "Couldn't check your watch words just now. Reload to try again."));
 })();
 </script>
 {% endmacro %}

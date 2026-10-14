@@ -259,13 +259,20 @@
   }
 
   // Two filters that combine: a severity tile, and My stack (the products picked on
-  // /stack, which are kept only in this browser).
+  // /stack and the watch words, both kept only in this browser).
   let sevFilter = null, stackOn = false;
   const stack = (() => {
     try { return new Set(JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]")); }
     catch (e) { return new Set(); }
   })();
-  const inStack = (li) => (li.dataset.products || "").split(" ").some((p) => p && stack.has(p));
+{{ ui.watch_js() }}
+  const words = watchLoad();
+  const watchMatch = watchMatcher(words);
+  const SECURITY = ["red", "orange", "yellow"];     // as for products: tech news and events aren't about your stack
+  const byWords = new Set(ITEMS.map((item, i) => (words.length && SECURITY.includes(item.severity) &&
+                                                  watchMatch(watchText(item)).length) ? i : -1).filter((i) => i >= 0));
+  const inStack = (li) => (li.dataset.products || "").split(" ").some((p) => p && stack.has(p)) ||
+                          byWords.has(Number(li.querySelector(".item").dataset.index));
 
   function applyFilters() {
     let first = null;
@@ -292,7 +299,7 @@
   });
 
   const toggle = $("stack-toggle");
-  if (stack.size) {
+  if (stack.size || words.length) {
     const matching = [...document.querySelectorAll("#feed li[data-sev]")].filter(inStack).length;
     toggle.textContent = "My stack: " + matching;
     toggle.hidden = false;
