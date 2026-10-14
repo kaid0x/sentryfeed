@@ -99,7 +99,7 @@ NAV = [
                ("Ransomware stats", "/ransomware", "ransomware"), ("Weekly digest", "/digest", "digest"),
                ("Gulf Cyber Pulse", "/gulf", "gulf")]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
-               ("Email header analyser", "/headers", "headers"), ("Domain check", None, None)]),
+               ("Email header analyser", "/headers", "headers"), ("Domain check", "/domain", "domain")]),
     ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
 ]
 
@@ -128,6 +128,15 @@ GLOSSARY = {
                      "changed and which domain vouches for it."),
     "dmarc": ("DMARC", "a domain's rule tying SPF and DKIM to the From address you see, and saying what to do with "
                        "email that fails. A pass means the From domain really sent it."),
+    "mx": ("MX record", "the DNS record that says which servers receive a domain's email."),
+    "mta-sts": ("MTA-STS", "a domain's rule that other mail servers must use encryption, with a valid certificate, "
+                           "when delivering email to it, so an attacker can't quietly turn encryption off."),
+    "tls-rpt": ("TLS-RPT", "a DNS record asking other mail servers to send reports when they can't deliver to a "
+                           "domain securely."),
+    "dnssec": ("DNSSEC", "digital signatures on a domain's DNS answers, so a resolver can tell a forged answer "
+                         "from a real one."),
+    "caa": ("CAA record", "a DNS record naming the certificate authorities allowed to issue HTTPS certificates "
+                          "for a domain. Others must refuse."),
     "hash": ("Hash", "a fixed-length fingerprint worked out from data. The same input always gives the same hash, "
                      "but the hash can't be turned back into the input."),
     "sec-8k": ("Form 8-K, Item 1.05", "since December 2023, a US-listed company must report a material cyber "

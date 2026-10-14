@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+
+{% block title %}{% if shown %}{{ shown }}: domain check{% else %}Domain security check{% endif %} · SentryFeed{% endblock %}
+
+{% block styles %}
+{% if domain %}<meta name="robots" content="noindex">{% endif %}
+<style nonce="{{ csp_nonce }}">
+  .d-head { margin: 28px 0 18px; }
+  .d-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 8px; }
+  .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 64ch; }
+  .tool { display: grid; grid-template-columns: 7fr 4fr; gap: 48px; align-items: start; }
+  .ask label { display: block; font-weight: 600; margin-bottom: 6px; }
+  .ask-row { display: flex; gap: 8px; max-width: 620px; }
+  .ask input { flex: 1; min-width: 0; min-height: 48px; border: 2px solid var(--ink); background: var(--bg); color: var(--ink); padding: 8px 12px; font: 17px var(--sans); }
+  .ask button, .share button { min-height: 48px; padding: 0 22px; border: 2px solid var(--ink); background: var(--ink); color: var(--bg); font: 700 16px var(--sans); cursor: pointer; }
+  .ask button:hover, .share button:hover { background: transparent; color: var(--ink); }
+  .ask .hint { font-size: 14px; color: var(--muted); margin: 8px 0 0; max-width: 62ch; }
+  .notice { margin: 18px 0 0; padding: 10px 14px; border-left: 3px solid var(--sev); max-width: 70ch; } /* the stripe marks how serious the notice is */
+  .side { border-left: 1px solid var(--rule); padding-left: 28px; font-size: 15px; }
+  .side h2 { font: 700 20px var(--serif); margin: 0 0 10px; }
+  .side ul { padding-left: 18px; margin: 0 0 16px; }
+  .side li { margin-bottom: 6px; }
+  .side .private { border-left: 3px solid var(--blue); padding: 4px 12px; } /* the stripe marks the privacy note */
+
+  .report { margin-top: 36px; }
+  .r-head { border-top: 3px double var(--strong-rule); padding-top: 14px; }
+  .r-head h2 { font: 700 clamp(26px, 3.4vw, 36px)/1.15 var(--serif); margin: 0 0 6px; overflow-wrap: anywhere; }
+  .r-score { font: 19px/1.45 var(--serif); margin: 0 0 4px; }
+  .r-score strong { font-size: 24px; }
+  .r-meta { color: var(--muted); font-size: 14px; margin: 0; }
+  .share { display: flex; gap: 8px; max-width: 620px; margin: 12px 0 0; }
+  .share input { flex: 1; min-width: 0; min-height: 44px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 8px 12px; font: 14px var(--mono); }
+  .share button { min-height: 44px; border-width: 1px; padding: 0 18px; font-size: 15px; }
+  .copied { font-size: 14px; color: var(--muted); margin: 6px 0 0; min-height: 1.4em; }
+
+  .group { margin-top: 30px; border-top: 2px solid var(--strong-rule); padding-top: 10px; }
+  .group h3 { font: 700 24px/1.2 var(--serif); margin: 0 0 4px; }
+  .checks { list-style: none; margin: 0; padding: 0; }
+  .check { padding: 14px 0 16px; border-bottom: 1px solid var(--rule); }
+  .check .c-head { font: 600 17px/1.35 var(--sans); margin: 0 0 2px; }
+  .check .verdict { color: var(--sev); font-weight: 700; }
+  .check .c-what { display: block; font: 400 14px var(--sans); color: var(--muted); margin-top: 2px; }
+  .check .c-line { font: 18px/1.45 var(--serif); margin: 6px 0 0; max-width: 70ch; }
+  .check ul { margin: 8px 0 0; padding-left: 20px; max-width: 70ch; font-size: 15px; }
+  .check ul li { margin-bottom: 4px; overflow-wrap: anywhere; }
+  .check .fix { margin: 8px 0 0; max-width: 70ch; font-size: 15px; }
+  .check details { margin: 8px 0 0; font-size: 14px; }
+  .check summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; color: var(--muted); }
+  .check code { display: block; font: 13px/1.5 var(--mono); padding: 8px 10px; background: var(--raised); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .v-in { --sev: var(--green); } .v-partly { --sev: var(--yellow); } .v-missing { --sev: var(--orange); }
+  .v-problem { --sev: var(--red); } .v-na, .v-unknown, .v-info { --sev: var(--muted); }
+  .n-error { --sev: var(--red); } .n-info { --sev: var(--blue); } .n-wait { --sev: var(--orange); }
+  .foot { margin: 24px 0 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+
+  @media (max-width: 860px) {
+    .tool { grid-template-columns: 1fr; gap: 24px; }
+    .side { border-left: 0; padding-left: 0; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  }
+  @media (max-width: 520px) { .ask-row, .share { flex-direction: column; } }
+</style>
+{% endblock %}
+
+{% macro named(key, title) %}{% if key in site_glossary %}{{ ui.term(key, title) }}{% else %}{{ title }}{% endif %}{% endmacro %}
+
+{% block body %}
+<main class="wrap">
+  <div class="d-head">
+    <h1>Domain security check</h1>
+    <p class="standfirst">Type a company's domain and see whether the public settings that stop people faking its email and tampering with its traffic are in place, with what each one means and how to fix it.</p>
+  </div>
+
+  <div class="tool">
+    <div>
+      <form class="ask" action="/domain" method="get" role="search">
+        <label for="d">Domain</label>
+        <div class="ask-row">
+          <input id="d" name="d" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="300" placeholder="example.ae" value="{{ shown or raw }}" required>
+          <button type="submit">Check</button>
+        </div>
+        <p class="hint">Just the domain, like <code>example.ae</code>. A pasted link works too: only its domain is used.</p>
+      </form>
+
+      {% if problem %}<p class="notice n-error" role="alert">{{ problem }}</p>{% endif %}
+      {% if note %}<p class="notice n-info">{{ note }}</p>{% endif %}
+      {% if refusal %}<p class="notice n-wait" role="alert">{{ refusal }}</p>{% endif %}
+      {% if db_problem %}
+        <p class="notice n-wait" role="alert">{% if setting_up %}The domain check is still being set up on this server. Please try again in half an hour.{% else %}SentryFeed couldn't reach its database just now, so it can't run checks. Please try again in a minute.{% endif %}</p>
+      {% endif %}
+    {% if result %}
+    <section class="report" aria-labelledby="r-title">
+      <div class="r-head">
+        <h2 id="r-title">{{ shown }}</h2>
+        {% if result.missing_domain %}
+          <p class="r-score">There's no domain called {{ shown }} in DNS. Check the spelling.</p>
+        {% elif result.dns_down %}
+          <p class="r-score">The DNS services SentryFeed uses didn't answer, so nothing could be checked. Please try again in a minute.</p>
+        {% else %}
+          {% set got, out_of = score %}
+          <p class="r-score"><strong>{{ got }} of {{ out_of }}</strong> settings in place.</p>
+          <p class="r-meta">Checked {{ checked_ago }} ({{ checked_dubai.strftime("%H:%M") }} Dubai time). Not-needed and couldn't-check items don't count.</p>
+          <div class="share">
+            <label class="sr-only" for="share-link">Link to this report</label>
+            <input id="share-link" type="text" readonly value="{{ share }}">
+            <button type="button" id="share-copy" hidden>Copy link</button>
+          </div>
+          <p class="copied" id="share-status" aria-live="polite"></p>
+        {% endif %}
+      </div>
+
+      {% for gkey, glabel in groups %}
+        {% set items = result.checks | selectattr("group", "equalto", gkey) | list %}
+        {% if items %}
+        <section class="group" aria-labelledby="g-{{ gkey }}">
+          <h3 id="g-{{ gkey }}">{{ glabel }}</h3>
+          <ul class="checks">
+            {% for c in items %}
+            <li class="check v-{{ c.verdict }}">
+              <p class="c-head">{% if verdicts[c.verdict] %}<span class="verdict">{{ verdicts[c.verdict] }}.</span> {% endif %}{{ named(c.key, c.title) }}<span class="c-what">{{ c.what }}</span></p>
+              <p class="c-line">{{ c.headline }}</p>
+              {% if c.details %}<ul>{% for d in c.details %}<li>{{ d }}</li>{% endfor %}</ul>{% endif %}
+              {% if c.fix %}<p class="fix"><strong>To fix:</strong> {{ c.fix }}</p>{% endif %}
+              {% if c.record %}<details><summary>The record as published</summary><code>{{ c.record }}</code></details>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endif %}
+      {% endfor %}
+
+      {% if result.checks %}
+      <p class="foot">Checked from outside, through DNS-over-HTTPS (Cloudflare, then Google), the way any mail server or browser would see it. A setting can be in place and still be wrong for your business, so treat this as a starting point, not an audit.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+    </div>
+
+    <aside class="side" aria-labelledby="side-title">
+      <h2 id="side-title">What it looks at</h2>
+      <ul>
+        <li><strong>Email:</strong> {{ ui.term("spf", "SPF") }}, {{ ui.term("dmarc", "DMARC") }}, {{ ui.term("mta-sts", "MTA-STS") }} and {{ ui.term("tls-rpt", "TLS-RPT") }}, plus who handles the domain's email.</li>
+        <li><strong>DNS:</strong> {{ ui.term("dnssec", "DNSSEC") }} and {{ ui.term("caa", "CAA") }}.</li>
+      </ul>
+      <p>Only public settings: the same DNS records every mail server and browser reads. It doesn't scan for weaknesses, try passwords or touch anything private.</p>
+      <p class="private">Results are kept for an hour, so a shared link shows the same report, then deleted. There's no public list of checked domains. To keep it fair, each visitor can run {{ per_hour }} new checks an hour.</p>
+    </aside>
+  </div>
+
+</main>
+{% endblock %}
+
+{% block scripts %}
+<script nonce="{{ csp_nonce }}">
+(function () {
+  const button = document.getElementById("share-copy");
+  if (!button) return;
+  const input = document.getElementById("share-link");
+  const status = document.getElementById("share-status");
+  button.hidden = false;
+  button.addEventListener("click", async () => {
+    input.focus();
+    input.select();
+    try {
+      if (!navigator.clipboard || !window.isSecureContext) throw new Error("no clipboard");
+      await navigator.clipboard.writeText(input.value);
+      status.textContent = "Copied.";
+    } catch (e) {
+      status.textContent = "Selected: press Ctrl+C (Cmd+C on a Mac) to copy.";
+    }
+  });
+})();
+</script>
+{% endblock %}

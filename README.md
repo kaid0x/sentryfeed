@@ -175,6 +175,25 @@ SentryFeed relays the request instead of the browser calling Pwned Passwords dir
 
 It says plainly that passing checks doesn't make an email safe, only shows which domain really sent it. Two made-up examples ("a normal email", "a suspicious one") use reserved example domains and documentation-only IP addresses, so it can be tried without real mail. Pasted text is only ever shown with `textContent`.
 
+## Domain security check
+
+`/domain` checks the public settings that stop people faking a domain's email and tampering with its traffic. Type a domain (a pasted link works; only its host is used) and the report says, for each setting, **In place**, **Partly**, **Missing** or **Problem**, what was found in plain words, how to fix it, and the record itself. The total is "X of Y settings in place", not a grade: settings that don't apply (MTA-STS for a domain that receives no email) or couldn't be checked aren't counted. `/domain?d=example.ae` is a link to share.
+
+| Check | What it looks for |
+|---|---|
+| Mail servers | Who handles the domain's email (Microsoft 365, Google Workspace, Proofpoint, Mimecast and others by name); a "null MX" or no MX means it takes no email. Context, not scored. |
+| SPF | One record (two is an error), how it ends (`-all` strict, `~all` soft, `?all` or nothing only partly, `+all` a problem), and the DNS lookups it needs, following `include:` and `redirect=` as receivers do: over 10 fails, an include of a domain without SPF fails, a loop fails; the same provider included twice is just counted twice. |
+| DMARC | One record, and its policy: `reject` or `quarantine` in place, `none` only monitoring. Notes missing reports (`rua=`), `pct` under 100 and `sp=none`. A subdomain without its own record is covered by its main domain's, but never by a registry name like `co.uk` or `gov.ae`. |
+| MTA-STS, TLS-RPT | Whether other mail servers must encrypt email sent here, and report when they can't. Not needed if the domain receives no email. (A direct STARTTLS test needs port 25, which cloud hosts block.) |
+| DNSSEC | Signed and verified, not signed, or signed but broken (resolvers refuse to answer, so other lookups fail too, and the page says that's why). |
+| CAA | Which certificate authorities may issue certificates, named (Let's Encrypt, DigiCert, Google Trust Services…), following parent domains as authorities do. Records that don't restrict issuing (only a contact email, say) count as not set. |
+
+**Safety.** The domain comes from a visitor, so it's checked before anything is looked up: a domain name only, converted to its DNS form (`مثال.امارات` works), with no IP addresses, ports, logins, special-use names (`localhost`, `.local`, `.internal`, `.test`, `.onion`, `home.arpa`…) or over-long names. Every lookup goes through DNS-over-HTTPS (Cloudflare, then Google if Cloudflare fails), never the network the site runs on, with 3 seconds per lookup and 8 for the whole check; anything unfinished says "couldn't check" rather than guessing. Records are shown as text and cut to 600 characters.
+
+**Limits and storage.** A domain checked in the last hour shows the saved result, so a shared link is cheap. New checks are limited to 10 an hour per visitor (their IP is kept only as a keyed hash, as for events) and 200 a day for the whole site; saved results and the limit log are deleted after a day, and there's no list of checked domains anywhere. Domains that don't exist and DNS outages aren't saved. Result pages aren't for search engines (`noindex`). The two tables are created by the collector, so for up to half an hour after the first deploy the page says it's still being set up.
+
+**Tested** with a fake DNS resolver for every rule above (138 checks, including hostile records with script tags, 11 levels of nested SPF includes, loops, and Turso's own missing-table error), then on real domains, cross-checked with `dig`: example.com (null MX, `-all`, `p=reject`, DNSSEC), gmail.com (DMARC `p=none`), cloudflare.com (7 SPF lookups), microsoft.com (a CAA record with only a contact email), and dnssec-failed.org (deliberately broken DNSSEC).
+
 ## File & link check
 
 `/scan` builds links to [VirusTotal](https://www.virustotal.com) reports, with second opinions where they apply:
@@ -399,7 +418,7 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 ## Planned
 
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
-- A domain security check: SPF, DMARC, DKIM, MX, MTA-STS and TLS-RPT (encrypted mail delivery; a direct STARTTLS test needs port 25, which cloud hosts block), HTTPS redirect, HSTS, certificate expiry, security.txt, DNSSEC and CAA for a domain you enter, shown as "X of Y in place" rather than a grade, with shareable result links. DKIM can't be listed from outside, so it tries about 40 selector names that mail services use, guards against domains that answer every name, and takes a selector typed in (the email header tool will show it). Through DNS-over-HTTPS, refusing private and local addresses, rate-limited with a counter in the database, with short timeouts.
+- The rest of the domain security check: DKIM (about 40 selector names that mail services use, guarding against domains that answer every name, plus a selector you type; the email header tool will show it), and the website checks (HTTPS redirect, HSTS, certificate expiry, security.txt and the MTA-STS policy file), connecting only to public addresses, on ports 80 and 443, with every redirect checked again.
 - "Learn this": stories link the kind of weakness behind them (its CWE, from NVD) to free hands-on labs, plus a page of labs matching this week's attacks.
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.

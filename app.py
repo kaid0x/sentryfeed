@@ -9,12 +9,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
-from flask import Flask, Response, abort, g, has_request_context, jsonify, redirect, render_template, request, url_for
+from flask import (Flask, Response, abort, g, has_request_context, jsonify, make_response, redirect,
+                   render_template, request, url_for)
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
 from db import DATABASE_ERRORS, ERRORS as DB_ERRORS, connect as open_database, last_collected
 from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
+import domaincheck
 import events
 import grouping
 import ics
@@ -856,6 +858,52 @@ def gulf_pulse():
 @app.route("/headers")
 def headers():
     return render_template("headers.html", active="headers")
+
+
+@app.route("/domain")
+def domain_check():
+    """The domain security check (domaincheck.py). ?d= makes a result shareable; a domain
+    checked in the last hour shows its saved result, and new checks are rate-limited."""
+    raw = request.args.get("d", "")
+    page = {"active": "domain", "raw": raw, "verdicts": domaincheck.VERDICTS, "groups": domaincheck.GROUPS,
+            "per_hour": domaincheck.CHECKS_PER_VISITOR_HOUR}
+    if not raw.strip():
+        return render_template("domain.html", **page)
+    try:
+        domain, shown, note = domaincheck.normalize(raw)
+    except ValueError as e:
+        return render_template("domain.html", problem=str(e), **page), 400
+    page.update(domain=domain, shown=shown, note=note,
+                share=url_for("domain_check", d=domain, _external=True))
+    try:
+        conn = connect()
+        try:
+            result = domaincheck.cached(conn, domain)
+            if result is None:
+                refusal = domaincheck.can_check(conn, events.visitor_key(app.config["SECRET_KEY"], visitor_address()))
+                if refusal:
+                    resp = make_response(render_template("domain.html", refusal=refusal, **page), 429)
+                    resp.headers["X-Robots-Tag"] = "noindex"
+                    return resp
+                domaincheck.record_check(conn, events.visitor_key(app.config["SECRET_KEY"], visitor_address()))
+                result = domaincheck.run(domain)
+                if result["checks"]:            # a domain that doesn't exist or a DNS outage isn't saved
+                    domaincheck.save(conn, result)
+        finally:
+            conn.close()
+    except DB_ERRORS as exc:
+        g.db_error = exc
+        setting_up = "no such table" in str(exc).lower()
+        resp = make_response(render_template("domain.html", db_problem=True, setting_up=setting_up, **page), 503)
+        resp.headers["X-Robots-Tag"] = "noindex"
+        return resp
+    checked = datetime.fromisoformat(result["checked_at"])
+    page.update(result=result, score=domaincheck.score(result),
+                checked_ago=ago(result["checked_at"], datetime.now(timezone.utc)),
+                checked_dubai=checked.astimezone(briefing.DUBAI))
+    resp = make_response(render_template("domain.html", **page))
+    resp.headers["X-Robots-Tag"] = "noindex"     # results are for whoever asked, not for search engines
+    return resp
 
 
 @app.route("/scan")

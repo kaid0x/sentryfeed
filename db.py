@@ -166,6 +166,18 @@ CREATE TABLE IF NOT EXISTS lookups (
     day         TEXT NOT NULL,          -- UTC date of the lookup
     PRIMARY KEY (kind, key)
 );
+-- Domain security check (domaincheck.py): results shown again for an hour, and a log of new
+-- checks for the rate limits. Both are deleted after a day; there's no list of checked domains.
+CREATE TABLE IF NOT EXISTS domain_checks (
+    domain      TEXT PRIMARY KEY,
+    checked_at  TEXT NOT NULL,
+    result      TEXT NOT NULL           -- JSON
+);
+CREATE TABLE IF NOT EXISTS domain_lookups (
+    visitor     TEXT NOT NULL,          -- keyed hash of the IP, as for events; never the IP itself
+    at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_domain_lookups_at ON domain_lookups(at);
 """
 
 
