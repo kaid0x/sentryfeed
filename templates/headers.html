@@ -117,6 +117,7 @@
     <section class="section" aria-labelledby="r-dkim" id="dkim-section">
       <h2 id="r-dkim">DKIM signatures</h2>
       <ul class="sigs" id="sigs"></ul>
+      <p class="caution">"Check this key" opens the <a href="/domain">domain security check</a> for that domain and selector. Only those two are sent, and only if you click.</p>
     </section>
     <section class="section">
       <details>
@@ -365,7 +366,18 @@
     // DKIM signatures
     const sigs = all(headers, "dkim-signature").map(parseTags);
     $("dkim-section").hidden = !sigs.length;
-    $("sigs").replaceChildren(...sigs.map((t) => el("li", "Domain " + (t.d || "?") + ", selector " + (t.s || "?") + (t.a ? ", " + t.a : ""))));
+    $("sigs").replaceChildren(...sigs.map((t) => {
+      const li = el("li", "Domain " + (t.d || "?") + ", selector " + (t.s || "?") + (t.a ? ", " + t.a : ""));
+      // A link to check that key on the domain check: only for a plausible domain and selector,
+      // built with URLSearchParams, and it sends nothing unless it's clicked.
+      const d = (t.d || "").trim().toLowerCase(), sel = (t.s || "").trim().toLowerCase();
+      if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) && d.length <= 230 && /^[a-z0-9_-]+(\.[a-z0-9_-]+)*$/.test(sel) && sel.length <= 100) {
+        const a = el("a", "Check this key");
+        a.href = "/domain?" + new URLSearchParams({ d: d, s: sel }).toString();
+        li.append(" · ", a);
+      }
+      return li;
+    }));
 
     // Every header
     $("header-count").textContent = headers.length;

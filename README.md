@@ -172,12 +172,13 @@ SentryFeed relays the request instead of the browser calling Pwned Passwords dir
 - **Warnings**, most serious first: DMARC failed, a display name that is itself a different address, replies going to another domain, SPF or DKIM failures, a different envelope sender or signing domain, and hops that didn't record encryption.
 - **Who sent it:** From, Reply-To, Return-Path, To, subject, date, Message-ID, and the sending server's IP as your server saw it, with links to check it on AbuseIPDB, VirusTotal and Shodan.
 - **The route**, oldest hop first, with the delay between hops, whether each was encrypted, and which addresses are on a private network; then the DKIM signatures and every header.
+- **DKIM signatures** list each one's domain (`d=`) and selector (`s=`), with a "Check this key" link to the [domain security check](#domain-security-check) for that pair. The link only appears for a plausible domain and selector, is built with `URLSearchParams`, and sends those two values only if it's clicked; the page says so.
 
 It says plainly that passing checks doesn't make an email safe, only shows which domain really sent it. Two made-up examples ("a normal email", "a suspicious one") use reserved example domains and documentation-only IP addresses, so it can be tried without real mail. Pasted text is only ever shown with `textContent`.
 
 ## Domain security check
 
-`/domain` checks the public settings that stop people faking a domain's email and tampering with its traffic. Type a domain (a pasted link works; only its host is used), and optionally a DKIM selector, and the report says, for each setting, **In place**, **Partly**, **Missing** or **Problem**, what was found in plain words, how to fix it, and the record itself. The total is "X of Y settings in place", not a grade: settings that don't apply (MTA-STS for a domain that receives no email) or couldn't be checked aren't counted. `/domain?d=example.ae` (with `&s=selector` if one was typed) is a link to share.
+`/domain` checks the public settings that stop people faking a domain's email and tampering with its traffic. Type a domain (a pasted link works; only its host is used), and optionally a DKIM selector (the email header analyser shows it, with a link straight here), and the report says, for each setting, **In place**, **Partly**, **Missing** or **Problem**, what was found in plain words, how to fix it, and the record itself. The total is "X of Y settings in place", not a grade: settings that don't apply (MTA-STS for a domain that receives no email) or couldn't be checked aren't counted. `/domain?d=example.ae` (with `&s=selector` if one was typed) is a link to share.
 
 | Check | What it looks for |
 |---|---|
@@ -432,7 +433,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 ## Planned
 
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
-- The email header analyser showing each DKIM signature's selector, with a link to check it on the domain security check.
 - "Learn this": stories link the kind of weakness behind them (its CWE, from NVD) to free hands-on labs, plus a page of labs matching this week's attacks.
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
