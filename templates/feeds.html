@@ -10,18 +10,19 @@
   .standfirst { font: 19px/1.5 var(--serif); margin: 0; max-width: 62ch; }
   .feeds { list-style: none; margin: 0; padding: 0; border-top: 2px solid var(--strong-rule); }
   .feeds li { padding: 16px 0 18px; border-bottom: 1px solid var(--rule); }
-  .feeds h2, .stack-feed h2, .how h2 { font: 700 22px/1.25 var(--serif); margin: 0 0 4px; }
+  .feeds h2, .stack-feed h2, .calendar h2, .how h2 { font: 700 22px/1.25 var(--serif); margin: 0 0 4px; }
   .feeds p { margin: 0 0 10px; max-width: 66ch; }
   .copy-row { display: flex; gap: 8px; max-width: 720px; }
   .copy-row input { flex: 1; min-width: 0; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 10px 12px; min-height: 44px; font: 14px var(--mono); }
   .copy-row button { min-height: 44px; padding: 0 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); font-weight: 700; cursor: pointer; }
   .copy-row button:hover { background: transparent; color: var(--ink); }
   .copied { font-size: 14px; color: var(--muted); margin: 6px 0 0; min-height: 1.4em; }
-  .stack-feed, .how { margin-top: 44px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
-  .stack-feed p, .how p, .how li { max-width: 66ch; }
+  .stack-feed, .calendar, .how { margin-top: 44px; border-top: 2px solid var(--strong-rule); padding-top: 12px; }
+  .stack-feed p, .calendar p, .how p, .how li { max-width: 66ch; }
+  .calendar h3 { font: 700 17px/1.3 var(--serif); margin: 22px 0 4px; }
   .privacy { border-left: 3px solid var(--blue); padding: 6px 12px; margin: 12px 0; } /* the stripe marks the privacy note */
-  .how ul { padding-left: 20px; }
-  .how li { margin-bottom: 6px; }
+  .how ul, .calendar ul { padding-left: 20px; }
+  .how li, .calendar li { margin-bottom: 6px; }
   @media (max-width: 600px) { .copy-row { flex-direction: column; } }
 </style>
 {% endblock %}
@@ -39,7 +40,7 @@
 <main class="wrap">
   <div class="f-head">
     <h1>Follow SentryFeed</h1>
-    <p class="standfirst">New stories come to your feed reader, Outlook or Slack through {{ ui.term("rss", "RSS") }}, without visiting the site. Each feed covers the last {{ days }} days and updates every 30 minutes.</p>
+    <p class="standfirst">New stories come to your feed reader, Outlook or Slack through {{ ui.term("rss", "RSS") }}, without visiting the site. Each feed covers the last {{ days }} days and updates every 30 minutes. Patch deadlines can go straight into <a href="#calendar">your calendar</a>.</p>
   </div>
 
   <ul class="feeds">
@@ -61,6 +62,24 @@
     </div>
   </section>
 
+  <section class="calendar" id="calendar" aria-labelledby="h-cal">
+    <h2 id="h-cal">Patch deadlines in your calendar</h2>
+    <p>When a flaw that attackers are already using joins {{ ui.term("kev", "CISA's exploited list") }}, CISA gives US federal agencies a date to fix it by. Those deadlines aren't binding on anyone else, but they're a widely used yardstick for how urgent a fix is.</p>
+    <p>Subscribe, and they appear in Outlook, Google Calendar or Apple Calendar as all-day entries: one per day with a deadline, listing each flaw with a link to its page here, from the last {{ cal_past_days }} days and everything ahead. The entries never mark you as busy, and your calendar picks up new ones by itself.</p>
+    {{ copy_row("cal-all", cal_url, "patch deadline calendar link") }}
+    <h3>Only your products</h3>
+    <p class="privacy"><strong>This link carries your product list too.</strong> Your calendar service (Google, Microsoft or Apple) fetches it from its own servers every few hours, so it sees the list, and so does SentryFeed's server. {% if on_vercel %}SentryFeed doesn't store it, but Vercel's request logs keep each link for an hour.{% else %}SentryFeed doesn't log or store it.{% endif %}</p>
+    <div id="cal-stack-out">
+      <p>Building this link needs JavaScript, since your products are kept in your browser. Without it, a link like <code>{{ cal_url }}?stack=fortinet,exchange</code> works too.</p>
+    </div>
+    <h3>How to subscribe</h3>
+    <ul>
+      <li><strong>Google Calendar</strong> (on a computer): next to Other calendars, choose + and then From URL, and paste the link. Google checks subscribed calendars on its own schedule, so a new deadline can take up to a day to appear.</li>
+      <li><strong>Outlook:</strong> Add calendar, then Subscribe from web, and paste the link.</li>
+      <li><strong>Apple Calendar:</strong> File, then New Calendar Subscription, and paste the link.</li>
+    </ul>
+  </section>
+
   <section class="how" aria-labelledby="h-how">
     <h2 id="h-how">How to follow a feed</h2>
     <ul>
@@ -76,6 +95,7 @@
 <script nonce="{{ csp_nonce }}">
 (function () {
   const STACK_BASE = {{ stack_base | tojson }};
+  const CAL_BASE = {{ cal_url | tojson }};
   const NAMES = {{ stack_names | tojson }};
 
   function wire(button) {
@@ -97,46 +117,50 @@
   }
   document.querySelectorAll("button.copy").forEach(wire);
 
-  // Your stack: the products saved in this browser, turned into a link.
-  const out = document.getElementById("stack-feed-out");
+  // Your stack: the products saved in this browser, turned into links (RSS and calendar).
   let saved = [];
   try { saved = JSON.parse(localStorage.getItem("sentryfeed.stack") || "[]").filter((p) => p in NAMES); } catch (e) { saved = []; }
-  out.replaceChildren();
-  if (!saved.length) {
-    const p = document.createElement("p");
-    const a = document.createElement("a");
-    a.href = "/stack";
-    a.textContent = "Pick your products on My stack";
-    p.append(a, " first, then come back here for your link.");
-    out.append(p);
-    return;
+
+  function stackLink(out, id, base, label) {
+    out.replaceChildren();
+    if (!saved.length) {
+      const p = document.createElement("p");
+      const a = document.createElement("a");
+      a.href = "/stack";
+      a.textContent = "Pick your products on My stack";
+      p.append(a, " first, then come back here for your link.");
+      out.append(p);
+      return;
+    }
+    const names = document.createElement("p");
+    names.textContent = "Products in this link: " + saved.map((p) => NAMES[p]).join(", ") + ".";
+    const row = document.createElement("div");
+    row.className = "copy-row";
+    const lab = document.createElement("label");
+    lab.className = "sr-only";
+    lab.htmlFor = id;
+    lab.textContent = label;
+    const input = document.createElement("input");
+    input.id = id;
+    input.type = "text";
+    input.readOnly = true;
+    input.value = base + "?stack=" + saved.join(",");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy";
+    button.dataset.copy = id;
+    button.setAttribute("aria-label", "Copy " + label.charAt(0).toLowerCase() + label.slice(1));
+    button.textContent = "Copy";
+    row.append(lab, input, button);
+    const status = document.createElement("p");
+    status.className = "copied";
+    status.id = id + "-status";
+    status.setAttribute("aria-live", "polite");
+    out.append(names, row, status);
+    wire(button);
   }
-  const names = document.createElement("p");
-  names.textContent = "Products in this link: " + saved.map((p) => NAMES[p]).join(", ") + ".";
-  const row = document.createElement("div");
-  row.className = "copy-row";
-  const label = document.createElement("label");
-  label.className = "sr-only";
-  label.htmlFor = "feed-stack";
-  label.textContent = "Your stack feed link";
-  const input = document.createElement("input");
-  input.id = "feed-stack";
-  input.type = "text";
-  input.readOnly = true;
-  input.value = STACK_BASE + "?stack=" + saved.join(",");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "copy";
-  button.dataset.copy = "feed-stack";
-  button.setAttribute("aria-label", "Copy your stack feed link");
-  button.textContent = "Copy";
-  row.append(label, input, button);
-  const status = document.createElement("p");
-  status.className = "copied";
-  status.id = "feed-stack-status";
-  status.setAttribute("aria-live", "polite");
-  out.append(names, row, status);
-  wire(button);
+  stackLink(document.getElementById("stack-feed-out"), "feed-stack", STACK_BASE, "Your stack feed link");
+  stackLink(document.getElementById("cal-stack-out"), "cal-stack", CAL_BASE, "Your stack calendar link");
 })();
 </script>
 {% endblock %}

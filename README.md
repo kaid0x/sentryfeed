@@ -122,7 +122,17 @@ Comparisons only appear between two complete weeks: not for the week in progress
 
 Each item has the readable headline, the plain-word reason, the summary, the other outlets and the CVEs, and links to the article. An item's ID is the story's first stored article, so it doesn't reappear when more outlets cover the same story. Feeds are RSS 2.0, built with ElementTree so feed text is always escaped, and every page advertises the Major feeds for readers that look for them.
 
-**The stack feed is the one place a product list leaves the browser.** It has to be in the link, because a feed reader fetches the feed without the browser. The `/feeds` page builds the link from the products saved on My stack and says plainly that SentryFeed's server sees the list on every check, as does anyone the link is shared with. The Pi's gunicorn keeps no access log, so there it isn't recorded. On Vercel the page says instead that Vercel records each request, link included, in its request logs, which the free plan keeps for an hour.
+**The stack feed and the stack calendar are the only places a product list leaves the browser.** It has to be in the link, because a feed reader fetches the feed without the browser. The `/feeds` page builds the link from the products saved on My stack and says plainly that SentryFeed's server sees the list on every check, as does anyone the link is shared with. The Pi's gunicorn keeps no access log, so there it isn't recorded. On Vercel the page says instead that Vercel records each request, link included, in its request logs, which the free plan keeps for an hour.
+
+### Patch-deadline calendar
+
+`/feeds/patch-deadlines.ics` is a calendar to subscribe to in Outlook, Google Calendar or Apple Calendar: CISA's fix-by dates for the flaws on its exploited list, from the last 30 days and everything ahead. Each day with a deadline is one all-day entry, like "CISA deadline: 3 exploited flaws (Fortinet, Microsoft, Ivanti), 1 used by ransomware", listing each flaw with a link to its page here; one entry per day rather than per flaw, since CISA often adds several at once. Entries are marked free, so they never make anyone look busy, and the calendar asks apps to check every 6 hours, as CISA's list is fetched daily.
+
+Every entry says what the date is: CISA's deadline for US federal agencies, not binding on anyone else but a widely used yardstick for urgency. CISA's own "required action" text isn't copied in, since it's written for US agencies (directives, "see URL in Notes"); the flaw's page has the fix status and the vendor's links.
+
+`?stack=fortinet,exchange` keeps only the flaws in those My stack products, matched as on the Patch page. As with the stack feed, the list is in the link, and here the calendar service (Google, Microsoft or Apple) fetches it from its own servers, so the `/feeds` page says that too.
+
+`ics.py` writes the file by hand to RFC 5545: CRLF line endings, lines folded at 75 bytes without splitting a character, text escaped, control characters removed (CISA's text is treated as untrusted, like feed content). Tested against the standard's rules with commas, semicolons, backslashes, line breaks, Arabic, emoji and control characters, the 120 folding cases around the 75-byte limit, the 30-day boundary, and every flaw in range appearing exactly once.
 
 ## Vulnerabilities
 
@@ -380,7 +390,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
 - A domain security check: SPF, DMARC, DKIM, MX, MTA-STS and TLS-RPT (encrypted mail delivery; a direct STARTTLS test needs port 25, which cloud hosts block), HTTPS redirect, HSTS, certificate expiry, security.txt, DNSSEC and CAA for a domain you enter, shown as "X of Y in place" rather than a grade, with shareable result links. DKIM can't be listed from outside, so it tries about 40 selector names that mail services use, guards against domains that answer every name, and takes a selector typed in (the email header tool will show it). Through DNS-over-HTTPS, refusing private and local addresses, rate-limited with a counter in the database, with short timeouts.
-- A patch-deadline calendar: a subscribable calendar (.ics) of CISA's fix-by dates for exploited flaws, labelled as deadlines set for US federal agencies.
 - "Learn this": stories link the kind of weakness behind them (its CWE, from NVD) to free hands-on labs, plus a page of labs matching this week's attacks.
 - Custom watch words in My stack: your own words to flag in headlines, kept in your browser like the rest of My stack.
 - An Arabic version of the site.

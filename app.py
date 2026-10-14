@@ -17,6 +17,7 @@ from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
 import events
 import grouping
+import ics
 import ransomware
 import rss
 import stack
@@ -647,6 +648,7 @@ def feeds_page():
              for name, (title, desc) in rss.FEEDS.items()]
     return render_template("feeds.html", active="feeds", feeds=feeds, stack_names=stack.NAMES,
                            stack_base=url_for("feed_xml", name="stack", _external=True), days=rss.FEED_DAYS,
+                           cal_url=url_for("deadline_calendar", _external=True), cal_past_days=ics.PAST_DAYS,
                            on_vercel=bool(os.environ.get("VERCEL")))
 
 
@@ -696,6 +698,35 @@ def feed_xml(name):
                          [rss.story_item(s, SEVERITY_LABEL[s["severity"]]) for s in chosen])
     resp = Response(body, mimetype="application/rss+xml")
     resp.headers["Cache-Control"] = "public, max-age=900"    # readers needn't ask more than every 15 minutes
+    return resp
+
+
+@app.route("/feeds/patch-deadlines.ics")
+def deadline_calendar():
+    """CISA's fix-by dates as a calendar to subscribe to (ics.py). ?stack= keeps only the flaws
+    in those My stack products, matched as on the Patch page."""
+    products = stack_from_link()
+    if "stack" in request.args and not products:
+        return Response("?stack= needs product ids from SentryFeed's My stack page, "
+                        "e.g. /feeds/patch-deadlines.ics?stack=fortinet,exchange\n", status=400,
+                        mimetype="text/plain")
+    since = (vulns.today() - timedelta(days=ics.PAST_DAYS)).isoformat()
+    conn = connect()
+    try:
+        rows = [dict(r) for r in conn.execute(
+            "SELECT cve_id, vendor, product, name, date_added, due_date, ransomware "
+            "FROM kev WHERE due_date >= ?", (since,))]
+    finally:
+        conn.close()
+    if products:
+        mine = set(products)
+        rows = [r for r in rows if mine & set(stack_products(r["vendor"], r["product"], r["name"]))]
+    name = "SentryFeed: CISA deadlines for your stack" if products else "SentryFeed: CISA patch deadlines"
+    body = ics.build(rows, name, request.url,
+                     lambda cve_id: url_for("vulnerability", cve_id=cve_id, _external=True),
+                     url_for("patch_first", _external=True))
+    resp = Response(body, mimetype="text/calendar")
+    resp.headers["Cache-Control"] = "public, max-age=3600"   # CISA's list changes once a day
     return resp
 
 
