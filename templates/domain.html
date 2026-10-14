@@ -139,7 +139,7 @@
       {% endfor %}
 
       {% if result.checks %}
-      <p class="foot">Checked from outside, through DNS-over-HTTPS (Cloudflare, then Google), the way any mail server or browser would see it. A setting can be in place and still be wrong for your business, so treat this as a starting point, not an audit.</p>
+      <p class="foot">Checked from outside, the way any mail server or browser would see it: DNS through DNS-over-HTTPS (Cloudflare, then Google), and the website from SentryFeed's server in Mumbai. A setting can be in place and still be wrong for your business, so treat this as a starting point, not an audit.</p>
       {% endif %}
     </section>
     {% endif %}
@@ -149,9 +149,10 @@
       <h2 id="side-title">What it looks at</h2>
       <ul>
         <li><strong>Email:</strong> {{ ui.term("spf", "SPF") }}, {{ ui.term("dmarc", "DMARC") }}, {{ ui.term("dkim", "DKIM") }}, {{ ui.term("mta-sts", "MTA-STS") }} and {{ ui.term("tls-rpt", "TLS-RPT") }}, plus who handles the domain's email.</li>
+        <li><strong>Website:</strong> whether http sends you to https, {{ ui.term("hsts", "HSTS") }}, the certificate, and {{ ui.term("security-txt", "security.txt") }}.</li>
         <li><strong>DNS:</strong> {{ ui.term("dnssec", "DNSSEC") }} and {{ ui.term("caa", "CAA") }}.</li>
       </ul>
-      <p>Only public settings: the same DNS records every mail server and browser reads. It doesn't scan for weaknesses, try passwords or touch anything private.</p>
+      <p>Only public settings: the DNS records every mail server reads, and what a browser sees when it opens the home page, plus two standard files (<code>security.txt</code> and the MTA-STS policy). It doesn't scan for weaknesses, try passwords or touch anything private, and it won't connect to private or internal addresses.</p>
       <p class="private">Results are kept for an hour, so a shared link shows the same report, then deleted. There's no public list of checked domains. To keep it fair, each visitor can run {{ per_hour }} new checks an hour.</p>
     </aside>
   </div>

@@ -137,6 +137,10 @@ GLOSSARY = {
                          "from a real one."),
     "caa": ("CAA record", "a DNS record naming the certificate authorities allowed to issue HTTPS certificates "
                           "for a domain. Others must refuse."),
+    "hsts": ("HSTS", "a header telling browsers to only ever use a site's encrypted address, so a visitor "
+                     "can't be quietly sent to the unencrypted one."),
+    "security-txt": ("security.txt", "a small file at /.well-known/security.txt saying how to report a security "
+                                     "problem to the site's owner (RFC 9116)."),
     "hash": ("Hash", "a fixed-length fingerprint worked out from data. The same input always gives the same hash, "
                      "but the hash can't be turned back into the input."),
     "sec-8k": ("Form 8-K, Item 1.05", "since December 2023, a US-listed company must report a material cyber "

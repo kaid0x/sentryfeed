@@ -13,6 +13,7 @@ import ipaddress
 import json
 import re
 import secrets
+import ssl
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -21,9 +22,12 @@ from datetime import datetime, timedelta, timezone
 import idna
 import requests
 
+import safefetch
+from safefetch import SPECIAL_TLDS
+
 RESOLVERS = ("https://cloudflare-dns.com/dns-query", "https://dns.google/resolve")
 DNS_TIMEOUT = 3            # seconds per resolver; Google is only asked if Cloudflare fails
-DEADLINE = 8               # seconds for the whole check; anything unfinished is "couldn't check"
+DEADLINE = 10              # seconds for the whole check; anything unfinished is "couldn't check"
 MAX_DOMAIN = 230           # leaves room for prefixes like _mta-sts. within DNS's 253
 SHOWN_RECORD = 600         # characters of a record shown on the page
 
@@ -35,9 +39,7 @@ CHECKS_PER_DAY = 200
 TYPES = {"A": 1, "NS": 2, "CNAME": 5, "SOA": 6, "MX": 15, "TXT": 16, "AAAA": 28, "DS": 43, "CAA": 257}
 
 # Names that never belong to a public domain (RFC 6761, 6762, 7686, 8375, 9476, and common
-# private ones). Checking them would mean looking at somebody's internal network naming.
-SPECIAL_TLDS = {"localhost", "local", "internal", "test", "example", "invalid", "onion", "arpa",
-                "alt", "lan", "home", "corp", "intranet", "private", "localdomain"}
+# private ones) live in safefetch.SPECIAL_TLDS, shared with the website checks.
 
 VERDICTS = {"in": "In place", "partly": "Partly", "missing": "Missing", "problem": "Problem",
             "na": "Not needed", "notfound": "Not found", "unknown": "Couldn't check", "info": ""}
@@ -763,6 +765,282 @@ def check_caa(dns, domain):
     return _check("caa", title, what, "in", headline, details, record=", ".join(found))
 
 
+# ---------- the website (connections go through safefetch) ----------
+
+HSTS_MIN = 15768000          # six months, the shortest guides accept; the browsers' preload list wants a year
+CERT_SOON_DAYS = 14
+SECURITY_TXT_BYTES = 32768
+POLICY_BYTES = 16384
+
+CERT_WORDS = [("certificate has expired", "it has expired"),
+              ("hostname mismatch", "it's for a different name, not this domain"),
+              ("self-signed", "it's self-signed, so browsers don't trust it"),
+              ("self signed", "it's self-signed, so browsers don't trust it"),
+              ("unable to get local issuer", "browsers can't trace it to an authority they trust (often the "
+                                             "server leaves out part of the certificate chain)"),
+              ("not yet valid", "it isn't valid yet")]
+
+
+def cert_words(message):
+    low = (message or "").lower()
+    return next((w for k, w in CERT_WORDS if k in low), message or "it couldn't be verified")
+
+
+def hsts_parse(value):
+    """(max_age or None, includeSubDomains, preload) from a Strict-Transport-Security header."""
+    max_age, sub, pre = None, False, False
+    for part in (value or "").split(";"):
+        part = part.strip()
+        m = re.fullmatch(r'max-age\s*=\s*"?(\d+)"?', part, re.I)
+        if m:
+            max_age = int(m.group(1))
+        sub = sub or part.lower() == "includesubdomains"
+        pre = pre or part.lower() == "preload"
+    return max_age, sub, pre
+
+
+def _web_titles(key):
+    return key, *TITLES[key]
+
+
+def check_web(dns, domain):
+    """The four website checks: HTTPS redirect, HSTS, certificate and security.txt."""
+    keys = ("https", "hsts", "certificate", "security-txt")
+
+    def every(verdict, headline):
+        return {k: _check(*_web_titles(k), verdict, headline) for k in keys}
+    try:
+        ips = safefetch.addresses(dns, domain)
+    except safefetch.Refused as e:
+        return every("unknown", str(e))
+    except DNSUnavailable:
+        return {k: unknown(*_web_titles(k)) for k in keys}
+    if not ips:
+        return every("na", f"There's no website at {domain} itself: it has no web address records.")
+    deadline = dns.deadline
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        f_https = pool.submit(safefetch.fetch, dns, f"https://{domain}/", deadline, 0, 0)
+        f_http = pool.submit(safefetch.fetch, dns, f"http://{domain}/", deadline, 0)
+        f_sec = pool.submit(safefetch.fetch, dns, f"https://{domain}/.well-known/security.txt", deadline,
+                            SECURITY_TXT_BYTES)
+        https_chain, https_err = f_https.result()
+        http_chain, http_err = f_http.result()
+        sec_chain, sec_err = f_sec.result()
+    out = {}
+    https_ok = bool(https_chain)
+
+    # Certificate
+    k = _web_titles("certificate")
+    if https_ok and https_chain[0]["cert"]:
+        cert = https_chain[0]["cert"]
+        left = int((ssl_time(cert.get("notAfter")) - time.time()) // 86400) if cert.get("notAfter") else None
+        issuer = dict(x[0] for x in cert.get("issuer", ()) if x).get("organizationName")
+        details = [f"Issued by {issuer}." if issuer else None,
+                   f"Valid until {long_date(datetime.fromtimestamp(ssl_time(cert['notAfter']), timezone.utc))}."
+                   if cert.get("notAfter") else None]
+        if left is not None and left <= CERT_SOON_DAYS:
+            out["certificate"] = _check(*k, "partly", f"Valid, but it expires in {left} day{'s' if left != 1 else ''}.",
+                                        details, fix="Renew it now, and make renewal automatic (most hosts and "
+                                                     "Let's Encrypt clients can).")
+        else:
+            out["certificate"] = _check(*k, "in", f"Valid, trusted by browsers, and good for {left} more days."
+                                        if left is not None else "Valid and trusted by browsers.", details)
+    elif isinstance(https_err, safefetch.FetchError) and https_err.kind == "cert":
+        out["certificate"] = _check(*k, "problem", f"The certificate isn't valid: {cert_words(str(https_err))}. "
+                                    "Browsers show visitors a full-page warning.",
+                                    fix="Install a valid certificate for this exact name, with its full chain. "
+                                        "Let's Encrypt certificates are free.")
+    elif https_err is not None and not isinstance(https_err, safefetch.Refused):
+        out["certificate"] = _check(*k, "problem", "The website doesn't answer over HTTPS, so visitors can't "
+                                    "reach it securely.", [str(https_err)],
+                                    fix="Turn on HTTPS at your web host, with a free Let's Encrypt certificate "
+                                        "if it doesn't come with one.")
+    else:
+        out["certificate"] = _check(*k, "unknown", str(https_err) if https_err else
+                                    "The secure connection gave no certificate details.")
+
+    # HSTS (browsers only honour it over a valid HTTPS connection)
+    k = _web_titles("hsts")
+    if https_ok:
+        value = https_chain[0]["headers"].get("strict-transport-security")
+        max_age, sub, pre = hsts_parse(value)
+        notes = (["It covers subdomains too (includeSubDomains)."] if sub else []) + \
+                (["It asks to be on browsers' built-in HTTPS-only list (preload)."] if pre else [])
+        fix = ("Send the header Strict-Transport-Security: max-age=31536000; includeSubDomains from the "
+               "HTTPS site, once every subdomain works over HTTPS.")
+        if not value or max_age is None:
+            out["hsts"] = _check(*k, "missing", "Not set, so a visitor's first visit can be quietly downgraded "
+                                 "to the unencrypted site by someone on the same network.", record=value, fix=fix)
+        elif max_age == 0:
+            out["hsts"] = _check(*k, "missing", "Turned off (max-age=0).", record=value, fix=fix)
+        elif max_age < HSTS_MIN:
+            out["hsts"] = _check(*k, "partly", f"Set, but browsers only remember it for {days_words(max_age)}. "
+                                 "Six months or more is the usual minimum.", notes, value, fix)
+        else:
+            out["hsts"] = _check(*k, "in", f"Browsers are told to use only the encrypted site for "
+                                 f"{days_words(max_age)}.", notes, value)
+    else:
+        out["hsts"] = _check(*k, "unknown", "Couldn't be checked, because the HTTPS site didn't give a valid "
+                             "answer (see Certificate).")
+
+    # HTTPS redirect
+    k = _web_titles("https")
+    first = http_chain[0] if http_chain else None
+    if first is None:
+        if https_ok:
+            out["https"] = _check(*k, "in", "Only HTTPS is offered: the plain http address doesn't answer, so "
+                                  "there's nothing unencrypted to land on.", [str(http_err)] if http_err else [])
+        else:
+            out["https"] = _check(*k, "unknown", "The website didn't answer on either address.")
+    elif first["status"] in (301, 302, 303, 307, 308) and (first["location"] or "").lower().startswith("https://"):
+        notes = []
+        if first["status"] in (302, 303, 307):
+            notes.append(f"It's a temporary redirect ({first['status']}); a permanent one (301 or 308) lets "
+                         "browsers remember it.")
+        out["https"] = _check(*k, "in", "The plain http address sends visitors straight to the encrypted site.",
+                              notes + [f"It goes to {first['location'][:120]}."])
+    elif first["status"] in (301, 302, 303, 307, 308):
+        reaches = any(h["url"].lower().startswith("https://") for h in http_chain[1:])
+        out["https"] = _check(*k, "partly" if reaches else "missing",
+                              "It redirects to another plain http address first" + (", then to HTTPS." if reaches else
+                                                                                     ", and never reaches HTTPS."),
+                              [f"First stop: {first['location'][:120]}."],
+                              fix="Redirect http:// straight to https:// on the same name.")
+    else:
+        out["https"] = _check(*k, "missing", "The plain http address shows the site unencrypted instead of "
+                              "redirecting to HTTPS.",
+                              fix="Redirect every http:// request to https:// (a setting at most web hosts).")
+
+    # security.txt
+    k = _web_titles("security-txt")
+    final = sec_chain[-1] if sec_chain else None
+    fix = (f"Publish a plain-text file at https://{domain}/.well-known/security.txt with at least a "
+           "Contact: line (an email address or form) and an Expires: date. securitytxt.org writes one for you.")
+    if final is None:
+        out["security-txt"] = (_check(*k, "unknown", "Couldn't be checked, because the HTTPS site didn't give a "
+                                      "valid answer (see Certificate).")
+                               if not https_ok else _check(*k, "missing", "Not found.", fix=fix))
+    elif final["status"] != 200 or not final["url"].lower().startswith("https://"):
+        out["security-txt"] = _check(*k, "missing", "Not published, so a researcher who finds a problem has "
+                                     "no clear way to tell you.", fix=fix)
+    else:
+        text = final["body"].decode("utf-8", "replace")
+        ctype = final["headers"].get("content-type", "").lower()
+        fields = {}
+        for line in text.splitlines():
+            m = re.match(r"^([A-Za-z-]+):\s*(.+?)\s*$", line)
+            if m:
+                fields.setdefault(m.group(1).lower(), []).append(m.group(2))
+        if "contact" not in fields or "<html" in text[:500].lower() or (ctype and not ctype.startswith("text/plain")):
+            out["security-txt"] = _check(*k, "missing", "Not published: the address gives a web page, not a "
+                                         "security.txt file.", fix=fix)
+        else:
+            contacts = [c[:100] for c in fields["contact"][:2]]
+            expires = fields.get("expires", [None])[0]
+            when = None
+            if expires:
+                try:            # RFC 3339 allows a lower-case t and z (github.com and google.com use z)
+                    when = datetime.fromisoformat(expires.strip().upper().replace("Z", "+00:00"))
+                    when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    when = None
+            details = [f"Contact: {', '.join(contacts)}."]
+            if expires and when is None:
+                out["security-txt"] = _check(*k, "partly", "Published, but its Expires date can't be read.",
+                                             details, fix="Use a date like 2027-06-30T00:00:00Z.")
+            elif when is None:
+                out["security-txt"] = _check(*k, "partly", "Published, but without the Expires date the standard "
+                                             "requires.", details, fix="Add a line like Expires: 2027-06-30T00:00:00Z.")
+            elif when < datetime.now(timezone.utc):
+                out["security-txt"] = _check(*k, "problem", f"Published, but it expired on {long_date(when)}, so "
+                                             "researchers can't trust its contacts are still right.", details,
+                                             fix="Check the contacts and set a new Expires date, a year ahead at most.")
+            else:
+                out["security-txt"] = _check(*k, "in", "Published: researchers can see how to report a problem.",
+                                             details + [f"Valid until {long_date(when)}."])
+    return out
+
+
+def ssl_time(value):
+    return ssl.cert_time_to_seconds(value)
+
+
+def long_date(when):
+    return f"{when.day} {when:%B %Y}"
+
+
+def days_words(seconds):
+    days = seconds // 86400
+    if days >= 365:
+        years = days // 365
+        return f"{years} year{'s' if years > 1 else ''}"
+    if days >= 30:
+        return f"{days // 30} month{'s' if days // 30 > 1 else ''}"
+    return f"{days} day{'s' if days != 1 else ''}" if days else f"{seconds} seconds"
+
+
+def mx_covered(host, patterns):
+    """MTA-STS mx: patterns: an exact name, or *.name matching one more label on the left."""
+    host = host.rstrip(".").lower()
+    for p in patterns:
+        p = p.rstrip(".").lower()
+        if p.startswith("*."):
+            if host.endswith(p[1:]) and "." not in host[: -len(p) + 1]:
+                return True
+        elif host == p:
+            return True
+    return False
+
+
+def check_mta_sts_policy(dns, domain, mx_hosts, record_check):
+    """The MTA-STS record only says a policy exists; the policy itself is a file on
+    https://mta-sts.<domain>, fetched without following redirects (RFC 8461)."""
+    title, what = TITLES["mta-sts"]
+    url = f"https://mta-sts.{domain}/.well-known/mta-sts.txt"
+    record = record_check.get("record")
+    chain, err = safefetch.fetch(dns, url, dns.deadline, POLICY_BYTES, follow=0)
+    fix = (f"Publish the policy file at {url}, served as plain text over HTTPS with a valid certificate, "
+           "with version: STSv1, mode: enforce, an mx: line for each mail server, and max_age: 604800 or more.")
+    if not chain:
+        reason = cert_words(str(err)) if isinstance(err, safefetch.FetchError) and err.kind == "cert" else str(err)
+        return _check("mta-sts", title, what, "problem", "The record says MTA-STS is on, but the policy file can't "
+                      "be fetched, so other servers ignore it.", [f"{url}: {reason}"], record, fix)
+    res = chain[0]
+    if res["status"] != 200:
+        return _check("mta-sts", title, what, "problem", "The record says MTA-STS is on, but the policy file isn't "
+                      f"there (HTTP {res['status']}), so other servers ignore it.", [url], record, fix)
+    fields = {}
+    for line in res["body"].decode("utf-8", "replace").splitlines():
+        m = re.match(r"^\s*([a-z_]+)\s*:\s*(.+?)\s*$", line)
+        if m:
+            fields.setdefault(m.group(1), []).append(m.group(2))
+    mode = (fields.get("mode") or [""])[0].lower()
+    max_age = (fields.get("max_age") or [""])[0]
+    patterns = fields.get("mx", [])
+    if (fields.get("version") or [""])[0] != "STSv1" or mode not in ("enforce", "testing", "none") or not max_age.isdigit():
+        return _check("mta-sts", title, what, "problem", "The policy file is incomplete (it needs version, mode and "
+                      "max_age), so other servers ignore it.", [url], record, fix)
+    details = [f"Policy: mode {mode}, mail servers {', '.join(patterns) or 'none listed'}, remembered for "
+               f"{days_words(int(max_age))}."]
+    uncovered = [h for h in mx_hosts if not mx_covered(h, patterns)]
+    if mode == "none":
+        return _check("mta-sts", title, what, "partly", "Published but switched off (mode: none).", details, record,
+                      "Set mode: testing, watch the TLS-RPT reports, then mode: enforce.")
+    if uncovered:
+        return _check("mta-sts", title, what, "problem", f"The policy leaves out {uncovered[0]}"
+                      + (f" and {len(uncovered) - 1} more" if len(uncovered) > 1 else "") +
+                      ", one of this domain's mail servers: servers that follow the policy will refuse to "
+                      "deliver to it.", details, record, "List every mail server on an mx: line.")
+    if mode == "testing":
+        return _check("mta-sts", title, what, "partly", "Testing only: failures are reported, but email is still "
+                      "delivered without encryption if an attacker strips it.", details, record,
+                      "Once the TLS-RPT reports are clean, change mode: testing to mode: enforce.")
+    if int(max_age) < 86400:
+        details.append("It's remembered for under a day; a week or more is recommended.")
+    return _check("mta-sts", title, what, "in", "Enforced: other mail servers must use encryption, with a valid "
+                  "certificate, to deliver email here.", details, record)
+
+
 # ---------- running every check ----------
 
 GROUPS = [("email", "Email"), ("web", "Website"), ("dns", "DNS")]
@@ -777,8 +1055,20 @@ TITLES = {"mx": ("Mail servers", "Which servers receive this domain's email"),
           "mta-sts": ("MTA-STS", "Whether other mail servers must encrypt email sent here"),
           "tls-rpt": ("TLS-RPT", "Reports when encrypted delivery to this domain fails"),
           "dkim": ("DKIM", "Whether email from this domain is signed"),
+          "https": ("HTTPS redirect", "Whether the plain http address sends visitors to the encrypted site"),
+          "hsts": ("HSTS", "Whether browsers are told to use only the encrypted site"),
+          "certificate": ("Certificate", "Whether the HTTPS certificate is valid, and how long it lasts"),
+          "security-txt": ("security.txt", "Whether security researchers can find how to report a problem"),
           "dnssec": ("DNSSEC", "Whether this domain's DNS answers are signed against forgery"),
           "caa": ("CAA", "Which certificate authorities may issue certificates for this domain")}
+
+
+def _mta_sts_full(dns, domain, receives_mail, hosts):
+    """The MTA-STS record, then, if it's there, the policy file it points to."""
+    found = check_mta_sts(dns, domain, receives_mail)
+    if found["verdict"] == "in":
+        return check_mta_sts_policy(dns, domain, hosts, found)
+    return found
 
 
 def exists(dns, domain):
@@ -811,6 +1101,7 @@ def run(domain, dns=None, selector=None):
         mx_future = pool.submit(check_mx, dns, domain)
         futures = {"spf": pool.submit(check_spf, dns, domain), "dmarc": pool.submit(check_dmarc, dns, domain),
                    "dnssec": pool.submit(check_dnssec, dns, domain), "caa": pool.submit(check_caa, dns, domain)}
+        web_future = pool.submit(check_web, dns, domain)
         try:
             results["mx"], receives_mail, hosts = mx_future.result(timeout=max(0.1, dns.time_left()))
         except Exception:                   # noqa: BLE001 - any failure here is "couldn't check"
@@ -819,14 +1110,19 @@ def run(domain, dns=None, selector=None):
             for key in ("mta-sts", "tls-rpt", "dkim"):
                 results[key] = unknown(key, *TITLES[key])
         else:
-            futures["mta-sts"] = pool.submit(check_mta_sts, dns, domain, receives_mail)
+            futures["mta-sts"] = pool.submit(_mta_sts_full, dns, domain, receives_mail, hosts)
             futures["tls-rpt"] = pool.submit(check_tls_rpt, dns, domain, receives_mail)
             futures["dkim"] = pool.submit(check_dkim, dns, domain, receives_mail, hosts, selector)
-        wait(futures.values(), timeout=max(0.1, dns.time_left()))
+        wait([*futures.values(), web_future], timeout=max(0.1, dns.time_left() + 1))
         for key, future in futures.items():
             try:
                 results[key] = future.result(timeout=0)
             except Exception:               # noqa: BLE001 - unfinished or failed: say so, don't guess
+                results[key] = unknown(key, *TITLES[key])
+        try:
+            results.update(web_future.result(timeout=0))
+        except Exception:                   # noqa: BLE001
+            for key in ("https", "hsts", "certificate", "security-txt"):
                 results[key] = unknown(key, *TITLES[key])
     checks = [results[k] for k in ORDER if k in results]
     broken = results.get("dnssec", {}).get("verdict") == "problem"
