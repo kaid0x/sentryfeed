@@ -16,6 +16,9 @@
   .ask button, .share button { min-height: 48px; padding: 0 22px; border: 2px solid var(--ink); background: var(--ink); color: var(--bg); font: 700 16px var(--sans); cursor: pointer; }
   .ask button:hover, .share button:hover { background: transparent; color: var(--ink); }
   .ask .hint { font-size: 14px; color: var(--muted); margin: 8px 0 0; max-width: 62ch; }
+  .ask .more { margin: 14px 0 0; max-width: 620px; }
+  .ask .more summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; font-weight: 600; }
+  .ask .more input { width: 100%; min-height: 44px; border: 1px solid var(--ink); background: var(--bg); color: var(--ink); padding: 8px 12px; font: 16px var(--mono); }
   .notice { margin: 18px 0 0; padding: 10px 14px; border-left: 3px solid var(--sev); max-width: 70ch; } /* the stripe marks how serious the notice is */
   .side { border-left: 1px solid var(--rule); padding-left: 28px; font-size: 15px; }
   .side h2 { font: 700 20px var(--serif); margin: 0 0 10px; }
@@ -49,7 +52,7 @@
   .check summary { cursor: pointer; min-height: 32px; display: inline-flex; align-items: center; color: var(--muted); }
   .check code { display: block; font: 13px/1.5 var(--mono); padding: 8px 10px; background: var(--raised); overflow-wrap: anywhere; white-space: pre-wrap; }
   .v-in { --sev: var(--green); } .v-partly { --sev: var(--yellow); } .v-missing { --sev: var(--orange); }
-  .v-problem { --sev: var(--red); } .v-na, .v-unknown, .v-info { --sev: var(--muted); }
+  .v-problem { --sev: var(--red); } .v-na, .v-unknown, .v-notfound, .v-info { --sev: var(--muted); }
   .n-error { --sev: var(--red); } .n-info { --sev: var(--blue); } .n-wait { --sev: var(--orange); }
   .foot { margin: 24px 0 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
 
@@ -79,6 +82,12 @@
           <button type="submit">Check</button>
         </div>
         <p class="hint">Just the domain, like <code>example.ae</code>. A pasted link works too: only its domain is used.</p>
+        <details class="more"{% if raw_selector %} open{% endif %}>
+          <summary>DKIM selector (optional)</summary>
+          <label for="s">Selector</label>
+          <input id="s" name="s" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="100" placeholder="selector1" value="{{ selector or raw_selector }}">
+          <p class="hint">DKIM keys can't be listed from outside, so the check tries the {{ selector_count }} names mail services use. If yours is different, type it here: it's the <code>s=</code> value in the DKIM-Signature header of an email from the domain, which the <a href="/headers">email header analyser</a> shows.</p>
+        </details>
       </form>
 
       {% if problem %}<p class="notice n-error" role="alert">{{ problem }}</p>{% endif %}
@@ -91,6 +100,7 @@
     <section class="report" aria-labelledby="r-title">
       <div class="r-head">
         <h2 id="r-title">{{ shown }}</h2>
+      {% if selector %}<p class="r-meta">DKIM checked under the selector you typed: <code>{{ selector }}</code>.</p>{% endif %}
         {% if result.missing_domain %}
           <p class="r-score">There's no domain called {{ shown }} in DNS. Check the spelling.</p>
         {% elif result.dns_down %}
@@ -138,7 +148,7 @@
     <aside class="side" aria-labelledby="side-title">
       <h2 id="side-title">What it looks at</h2>
       <ul>
-        <li><strong>Email:</strong> {{ ui.term("spf", "SPF") }}, {{ ui.term("dmarc", "DMARC") }}, {{ ui.term("mta-sts", "MTA-STS") }} and {{ ui.term("tls-rpt", "TLS-RPT") }}, plus who handles the domain's email.</li>
+        <li><strong>Email:</strong> {{ ui.term("spf", "SPF") }}, {{ ui.term("dmarc", "DMARC") }}, {{ ui.term("dkim", "DKIM") }}, {{ ui.term("mta-sts", "MTA-STS") }} and {{ ui.term("tls-rpt", "TLS-RPT") }}, plus who handles the domain's email.</li>
         <li><strong>DNS:</strong> {{ ui.term("dnssec", "DNSSEC") }} and {{ ui.term("caa", "CAA") }}.</li>
       </ul>
       <p>Only public settings: the same DNS records every mail server and browser reads. It doesn't scan for weaknesses, try passwords or touch anything private.</p>

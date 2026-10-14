@@ -864,21 +864,25 @@ def headers():
 def domain_check():
     """The domain security check (domaincheck.py). ?d= makes a result shareable; a domain
     checked in the last hour shows its saved result, and new checks are rate-limited."""
-    raw = request.args.get("d", "")
-    page = {"active": "domain", "raw": raw, "verdicts": domaincheck.VERDICTS, "groups": domaincheck.GROUPS,
-            "per_hour": domaincheck.CHECKS_PER_VISITOR_HOUR}
+    raw, raw_selector = request.args.get("d", ""), request.args.get("s", "")
+    page = {"active": "domain", "raw": raw, "raw_selector": raw_selector, "verdicts": domaincheck.VERDICTS,
+            "groups": domaincheck.GROUPS, "per_hour": domaincheck.CHECKS_PER_VISITOR_HOUR,
+            "selector_count": len(domaincheck.DKIM_SELECTORS)}
     if not raw.strip():
         return render_template("domain.html", **page)
     try:
         domain, shown, note = domaincheck.normalize(raw)
+        selector = domaincheck.normalize_selector(raw_selector)
     except ValueError as e:
         return render_template("domain.html", problem=str(e), **page), 400
-    page.update(domain=domain, shown=shown, note=note,
-                share=url_for("domain_check", d=domain, _external=True))
+    key = domaincheck.cache_key(domain, selector)
+    page.update(domain=domain, shown=shown, note=note, selector=selector,
+                share=url_for("domain_check", d=domain, s=selector, _external=True) if selector
+                else url_for("domain_check", d=domain, _external=True))
     try:
         conn = connect()
         try:
-            result = domaincheck.cached(conn, domain)
+            result = domaincheck.cached(conn, key)
             if result is None:
                 refusal = domaincheck.can_check(conn, events.visitor_key(app.config["SECRET_KEY"], visitor_address()))
                 if refusal:
@@ -886,9 +890,9 @@ def domain_check():
                     resp.headers["X-Robots-Tag"] = "noindex"
                     return resp
                 domaincheck.record_check(conn, events.visitor_key(app.config["SECRET_KEY"], visitor_address()))
-                result = domaincheck.run(domain)
+                result = domaincheck.run(domain, selector=selector)
                 if result["checks"]:            # a domain that doesn't exist or a DNS outage isn't saved
-                    domaincheck.save(conn, result)
+                    domaincheck.save(conn, key, result)
         finally:
             conn.close()
     except DB_ERRORS as exc:

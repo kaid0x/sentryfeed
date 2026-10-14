@@ -8,9 +8,12 @@ A domain from a visitor is untrusted: normalize() accepts a domain name and noth
 addresses, ports, logins or special-use names like localhost), and every record that comes back
 is shown as text, cut to a sensible length.
 """
+import base64
 import ipaddress
 import json
 import re
+import secrets
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
@@ -37,7 +40,7 @@ SPECIAL_TLDS = {"localhost", "local", "internal", "test", "example", "invalid", 
                 "alt", "lan", "home", "corp", "intranet", "private", "localdomain"}
 
 VERDICTS = {"in": "In place", "partly": "Partly", "missing": "Missing", "problem": "Problem",
-            "na": "Not needed", "unknown": "Couldn't check", "info": ""}
+            "na": "Not needed", "notfound": "Not found", "unknown": "Couldn't check", "info": ""}
 SCORED = ("in", "partly", "missing", "problem")
 
 
@@ -133,12 +136,17 @@ class Resolver:
         self.session = requests.Session()
         self.session.headers["Accept"] = "application/dns-json"
         self.deadline = deadline or (time.monotonic() + DEADLINE)
+        self.cache, self.lock = {}, threading.Lock()     # the same record is often read by two checks
 
     def time_left(self):
         return self.deadline - time.monotonic()
 
     def query(self, name, rtype, cd=False):
         """{"status": DNS rcode, "ad": validated, "answers": [(type number, data)]}."""
+        key = (name.lower(), rtype, cd)
+        with self.lock:
+            if key in self.cache:
+                return self.cache[key]
         if self.time_left() <= 0:
             raise DNSUnavailable("out of time")
         params = {"name": name, "type": rtype}
@@ -150,8 +158,11 @@ class Resolver:
                 if r.status_code != 200:
                     continue
                 d = r.json()
-                return {"status": int(d.get("Status", -1)), "ad": bool(d.get("AD")),
-                        "answers": [(int(a["type"]), str(a["data"])) for a in d.get("Answer", []) or []]}
+                res = {"status": int(d.get("Status", -1)), "ad": bool(d.get("AD")),
+                       "answers": [(int(a["type"]), str(a["data"])) for a in d.get("Answer", []) or []]}
+                with self.lock:
+                    self.cache[key] = res
+                return res
             except (requests.RequestException, ValueError, KeyError, TypeError):
                 continue
         raise DNSUnavailable(f"{rtype} {name}")
@@ -409,7 +420,7 @@ def check_dmarc(dns, domain):
 def check_mta_sts(dns, domain, receives_mail):
     title, what = "MTA-STS", "Whether other mail servers must encrypt email sent here"
     if not receives_mail:
-        return _check("mta-sts", title, what, "na", "Not needed: this domain doesn't receive email.")
+        return _check("mta-sts", title, what, "na", "This domain doesn't receive email, so there's nothing to protect.")
     found = [t for t in dns.records(f"_mta-sts.{domain}", "TXT") if re.match(r"^v=STSv1\s*(;|$)", t.strip())]
     if not found:
         return _check("mta-sts", title, what, "missing", "Not set up. Email sent here is encrypted only if both "
@@ -426,7 +437,7 @@ def check_mta_sts(dns, domain, receives_mail):
 def check_tls_rpt(dns, domain, receives_mail):
     title, what = "TLS-RPT", "Reports when encrypted delivery to this domain fails"
     if not receives_mail:
-        return _check("tls-rpt", title, what, "na", "Not needed: this domain doesn't receive email.")
+        return _check("tls-rpt", title, what, "na", "This domain doesn't receive email, so there's nothing to protect.")
     found = [t for t in dns.records(f"_smtp._tls.{domain}", "TXT") if re.match(r"^v=TLSRPTv1\s*(;|$)", t.strip())]
     if not found:
         return _check("tls-rpt", title, what, "missing", "Not set up, so you won't hear if other servers can't "
@@ -434,6 +445,245 @@ def check_tls_rpt(dns, domain, receives_mail):
                       fix="Publish a TXT record at _smtp._tls with v=TLSRPTv1; rua=mailto:(an address for reports).")
     return _check("tls-rpt", title, what, "in", "Turned on: other servers report failed secure deliveries.",
                   record=found[0])
+
+
+# ---------- DKIM ----------
+
+# DKIM keys live at <selector>._domainkey.<domain>, and nothing lists the selectors, so the check
+# tries the names mail services use. Ordered by how often they were found in a study of 74 Gulf
+# and global domains; the USENIX Security 2022 DKIM study found that past about 40 names, more
+# find almost nothing. A visitor can also type their own selector (the s= in a DKIM-Signature).
+DKIM_SELECTORS = ["s1", "s2", "google", "selector1", "selector2", "zendesk1", "zendesk2", "k1", "k2", "k3",
+                  "mandrill", "cm", "dkim", "s1024", "s2048", "mailjet", "smtp", "kl", "kl2", "krs", "mailo",
+                  "mail", "mail2", "hs1", "hs2", "sel1", "default", "pm", "protonmail", "protonmail2",
+                  "protonmail3", "fm1", "fm2", "fm3", "key1", "key2", "zmail", "zoho", "sig1", "brevo1", "brevo2",
+                  "everlytickey1", "everlytickey2", "mxvault"]
+
+# Who a key belongs to. A key reached through a CNAME is named by where it points, which is
+# reliable; otherwise by the selector name, which is only a hint ("names used by").
+DKIM_CNAME_PROVIDERS = [
+    ("dkim.mail.microsoft", "Microsoft 365"), ("onmicrosoft.com", "Microsoft 365"), ("sendgrid.net", "SendGrid"),
+    ("mcsv.net", "Mailchimp"), ("mandrillapp.com", "Mailchimp Transactional"), ("zendesk.com", "Zendesk"),
+    ("klaviyo.com", "Klaviyo"), ("hubspotemail.net", "HubSpot"), ("mailgun.org", "Mailgun"),
+    ("amazonses.com", "Amazon SES"), ("mailjet.com", "Mailjet"), ("protonmail.ch", "Proton Mail"),
+    ("messagingengine.com", "Fastmail"), ("zoho.com", "Zoho Mail"), ("mtasv.net", "Postmark"),
+    ("createsend.com", "Campaign Monitor"), ("brevo.com", "Brevo"), ("sendinblue.com", "Brevo"),
+    ("icloud.com", "iCloud Mail"), ("google.com", "Google Workspace"),
+]
+DKIM_NAME_PROVIDERS = {
+    "google": "Google Workspace", "selector1": "Microsoft 365", "selector2": "Microsoft 365", "s1": "SendGrid",
+    "s2": "SendGrid", "k1": "Mailchimp", "k2": "Mailchimp", "k3": "Mailchimp", "mandrill": "Mailchimp Transactional",
+    "zendesk1": "Zendesk", "zendesk2": "Zendesk", "kl": "Klaviyo", "kl2": "Klaviyo", "mailjet": "Mailjet",
+    "hs1": "HubSpot", "hs2": "HubSpot", "protonmail": "Proton Mail", "protonmail2": "Proton Mail",
+    "protonmail3": "Proton Mail", "fm1": "Fastmail", "fm2": "Fastmail", "fm3": "Fastmail", "cm": "Campaign Monitor",
+    "krs": "Mailgun", "mailo": "Mailgun", "pm": "Postmark", "s1024": "Yahoo", "s2048": "Yahoo", "zmail": "Zoho Mail",
+    "zoho": "Zoho Mail", "sig1": "iCloud Mail", "brevo1": "Brevo", "brevo2": "Brevo",
+}
+# Services whose DKIM names are fixed, and how their SPF include looks: listed in SPF but with
+# no key under those names suggests DKIM isn't set up there.
+DKIM_FIXED = [("Google Workspace", "_spf.google.com", ("google",)), ("SendGrid", "sendgrid.net", ("s1", "s2")),
+              ("Mailchimp", "servers.mcsv.net", ("k1", "k2", "k3")), ("Zendesk", "mail.zendesk.com", ("zendesk1", "zendesk2")),
+              ("Klaviyo", "klaviyo", ("kl", "kl2")), ("Mailjet", "spf.mailjet.com", ("mailjet",))]
+# Filtering services in front of a domain's email; they often sign outgoing email themselves.
+MAIL_GATEWAYS = [("pphosted.com", "Proofpoint"), ("ppe-hosted.com", "Proofpoint"), ("mimecast", "Mimecast"),
+                 ("messagelabs.com", "Broadcom Email Security"), ("iphmx.com", "Cisco Secure Email"),
+                 ("fortimailcloud.com", "FortiMail Cloud"), ("barracudanetworks.com", "Barracuda")]
+
+
+def dkim_tags(record):
+    tags = {}
+    for part in record.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            tags.setdefault(k.strip().lower(), re.sub(r"\s+", "", v))
+    return tags
+
+
+def _der_length(b, i):
+    n = b[i]
+    if n < 0x80:
+        return n, i + 1
+    k = n & 0x7F
+    if k == 0 or k > 4 or i + 1 + k > len(b):
+        raise ValueError("bad length")
+    return int.from_bytes(b[i + 1:i + 1 + k], "big"), i + 1 + k
+
+
+def dkim_key(tags):
+    """(problem or None, size in words like "2048-bit RSA", bits or None) for one key record.
+    The key's own length field must match its size: a key cut short (it happens when a long
+    record is pasted into a DNS form) fails every signature."""
+    p, k = tags.get("p", ""), tags.get("k", "rsa").lower()
+    try:
+        b = base64.b64decode(p + "=" * (-len(p) % 4), validate=True)
+    except (ValueError, TypeError):
+        return "isn't valid base64, so receivers can't read it", None, None
+    if k == "ed25519":
+        return (None, "Ed25519", 256) if len(b) == 32 else ("is damaged (an Ed25519 key is 32 bytes)", None, None)
+    if k != "rsa":
+        return f"uses a key type receivers don't support (k={k})", None, None
+    try:
+        if not b or b[0] != 0x30:
+            raise ValueError
+        length, start = _der_length(b, 1)
+        if start + length != len(b):
+            return "is damaged: it's cut short or has extra data, so every signature with it fails", None, None
+        def read(i):
+            tag = b[i]
+            n, j = _der_length(b, i + 1)
+            return tag, j, j + n
+        tag, s1, e1 = read(start)
+        if tag == 0x30:                          # SubjectPublicKeyInfo: algorithm, then the key in a BIT STRING
+            tag, s2, e2 = read(e1)
+            if tag != 0x03:
+                raise ValueError
+            tag, s3, e3 = read(s2 + 1)
+            tag, s4, e4 = read(s3)
+        else:                                    # a bare RSAPublicKey: the modulus comes first
+            s4, e4 = s1, e1
+        bits = len(b[s4:e4].lstrip(b"\x00")) * 8
+    except (ValueError, IndexError):
+        return "is damaged, so receivers can't read it", None, None
+    if bits < 1024:
+        return f"is only {bits}-bit; receivers ignore keys under 1024 bits", None, bits
+    return None, f"{bits}-bit RSA", bits
+
+
+def _provider(selector, cname):
+    """(provider, certain): certain when the key points to the provider's own servers."""
+    if cname:
+        target = cname[-1].rstrip(".").lower()
+        for suffix, name in DKIM_CNAME_PROVIDERS:
+            if target == suffix or target.endswith("." + suffix):
+                return name, True
+    return DKIM_NAME_PROVIDERS.get(selector), False
+
+
+def check_dkim(dns, domain, receives_mail, mx_hosts, selector=None):
+    title, what = "DKIM", "Whether email from this domain is signed"
+    try:
+        spf = " ".join(_spf_records(dns, domain)).lower()
+    except DNSUnavailable:
+        spf = ""
+    sends_none = not spf or re.fullmatch(r"v=spf1\s+-all", spf.strip()) is not None
+    names = [selector] if selector else DKIM_SELECTORS
+    probe = "zz-" + secrets.token_hex(5)            # a name nobody uses: does the domain answer anything?
+
+    def look(name):
+        try:
+            res = dns.query(f"{name}._domainkey.{domain}", "TXT")
+        except DNSUnavailable:
+            return name, None
+        if res["status"] not in (0, 3):
+            return name, None
+        cname = [d.rstrip(".") for t, d in res["answers"] if t == 5]
+        recs = [x for x in (_txt_value(d) for t, d in res["answers"] if t == 16)
+                if re.search(r"(^|;)\s*p\s*=", x) or x.strip().lower().startswith("v=dkim1")]
+        return name, (cname, recs)
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        answers = dict(pool.map(look, names + [probe]))
+    junk = answers.pop(probe)
+    failed = [n for n, a in answers.items() if a is None]
+    if junk is None or len(failed) > len(names) // 4:
+        return unknown("dkim", title, what)
+    if any(dkim_tags(r).get("p") for r in junk[1]):
+        return _check("dkim", title, what, "unknown", "This domain answers every name with a key, even made-up "
+                      "ones, so a key found under a common name proves nothing.")
+    blank_everywhere = bool(junk[1])
+    wildcard_cname = bool(junk[0])
+
+    found, problems, weak, revoked = {}, [], [], []
+    for name in names:
+        a = answers.get(name)
+        if not a or not a[1]:
+            continue
+        cname, recs = a
+        keyed = [r for r in recs if dkim_tags(r).get("p")]
+        if not keyed:
+            revoked.append(name)
+            continue
+        if len(recs) > 1:
+            problems.append(f"There are {len(recs)} records under {name}, so receivers can't tell which to use.")
+        tags = dkim_tags(keyed[0])
+        problem, size, bits = dkim_key(tags)
+        who, certain = _provider(name, cname)
+        if problem:
+            problems.append(f"The key under {name}" + (f" ({who})" if who and certain else "") + f" {problem}.")
+        if tags.get("t") and "y" in tags["t"].split(":"):
+            problems.append(f"The key under {name} is in testing mode (t=y), so receivers treat its email as unsigned.")
+        if tags.get("h") and "sha256" not in tags["h"].lower().split(":"):
+            problems.append(f"The key under {name} only allows SHA-1, which receivers no longer accept.")
+        if bits == 1024 and not cname and not problem:
+            weak.append(name)
+        found[name] = (who, size, bool(cname))
+
+    def present(name):
+        a = answers.get(name)
+        return bool(a and (a[1] or (a[0] and not wildcard_cname)))
+
+    gateway = next((g for suffix, g in MAIL_GATEWAYS if suffix in spf or any(suffix in h for h in mx_hosts)), None)
+    m365_mx = any(h.endswith("mail.protection.outlook.com") for h in mx_hosts)
+    m365_spf = "spf.protection.outlook.com" in spf
+    hints, notes = [], []          # hints: something looks missing; notes: context only
+    if not selector:
+        if (m365_mx or m365_spf) and not present("selector1") and not present("selector2"):
+            if gateway:
+                notes.append(f"{gateway} handles this domain's email and may sign it under its own name, so "
+                             "Microsoft 365's DKIM names being absent may be fine.")
+            else:
+                hints.append(("Email goes through Microsoft 365" if m365_mx else
+                              "Your SPF lets Microsoft 365 send for this domain") +
+                             ", but Microsoft's DKIM names (selector1, selector2) aren't set up. Microsoft then signs "
+                             "with its own onmicrosoft.com name, which doesn't count for this domain's DMARC.")
+        for prov, include, fixed in DKIM_FIXED:
+            if include in spf and not any(present(n) for n in fixed):
+                hints.append(f"Your SPF lets {prov} send for this domain, but there's no key under the names "
+                             f"{prov} uses ({', '.join(fixed)}). Check DKIM in your {prov} settings; it may use a "
+                             "custom name.")
+    m365_fix = ("Turn on DKIM for the domain in the Microsoft Defender portal (Email & collaboration, Policies, "
+                "Email authentication settings, DKIM), and publish the two CNAME records it gives you.")
+
+    if found:
+        groups = {}
+        for name, (who, size, managed) in found.items():
+            groups.setdefault(who or "this domain's own mail server", []).append(name)
+        named = "; ".join(f"{who} ({', '.join(ns)})" for who, ns in groups.items())
+        details = [f"Keys found under names used by: {named}."]
+        details += [f"The key under {n} is {found[n][1]}." for n in found if found[n][1]][:8]
+        if weak:
+            details.append(f"Your own key{'s' if len(weak) > 1 else ''} ({', '.join(weak)}) "
+                           f"{'are' if len(weak) > 1 else 'is'} 1024-bit: still accepted, but 2048 is now recommended. "
+                           "(Keys a service publishes for you are its choice.)")
+        if problems:
+            return _check("dkim", title, what, "problem", problems[0], problems[1:] + details + hints + notes,
+                          fix="Replace the broken key: publish the full key again from your mail service, in one "
+                              "record. Long keys are often cut short when pasted into a DNS form.")
+        if hints:
+            return _check("dkim", title, what, "partly", "Some of this domain's email is signed, but not all of it "
+                          "may be.", hints + details + notes,
+                          fix=m365_fix if any("Microsoft's DKIM" in h for h in hints) else None)
+        return _check("dkim", title, what, "in", "Signed: receivers can check that this domain's email is "
+                      "genuine and unchanged.", details + notes)
+    if selector:
+        return _check("dkim", title, what, "missing", f"There's no DKIM key under {selector}._domainkey.{domain}.",
+                      ["Check the name: it's the s= value in the DKIM-Signature header of an email from this "
+                       "domain, and the d= value there should be this domain."])
+    if blank_everywhere:
+        if not receives_mail and sends_none:
+            return _check("dkim", title, what, "na", "This domain publishes empty keys for every name, saying it "
+                          "never signs email, which is right for a domain that sends none.")
+        return _check("dkim", title, what, "unknown", "This domain answers every name with an empty key and "
+                      "hides its real one. Type the selector from one of your emails to check it.")
+    if hints and "Microsoft's DKIM" in hints[0]:
+        return _check("dkim", title, what, "missing", "No DKIM key found. " + hints[0], hints[1:] + notes, fix=m365_fix)
+    if not receives_mail and sends_none:
+        return _check("dkim", title, what, "na", "This domain receives no email, its SPF (if any) allows no "
+                      "senders, and no keys were found: DKIM is only needed for a domain that sends email.")
+    return _check("dkim", title, what, "notfound", f"No key found under the {len(names)} names mail services "
+                  "commonly use. That doesn't mean DKIM is off: your service may use its own name. Type the "
+                  "selector from one of your emails to check it.", hints + notes + ([f"Couldn't look up "
+                  f"{len(failed)} of the names in time."] if failed else []))
 
 
 # ---------- DNSSEC and CAA ----------
@@ -526,6 +776,7 @@ TITLES = {"mx": ("Mail servers", "Which servers receive this domain's email"),
           "dmarc": ("DMARC", "What receivers do with email that fails SPF and DKIM"),
           "mta-sts": ("MTA-STS", "Whether other mail servers must encrypt email sent here"),
           "tls-rpt": ("TLS-RPT", "Reports when encrypted delivery to this domain fails"),
+          "dkim": ("DKIM", "Whether email from this domain is signed"),
           "dnssec": ("DNSSEC", "Whether this domain's DNS answers are signed against forgery"),
           "caa": ("CAA", "Which certificate authorities may issue certificates for this domain")}
 
@@ -544,8 +795,9 @@ def exists(dns, domain):
     return False
 
 
-def run(domain, dns=None):
-    """Every check for one domain, as a dict ready to save and show."""
+def run(domain, dns=None, selector=None):
+    """Every check for one domain, as a dict ready to save and show. selector: a DKIM selector the
+    visitor typed, checked instead of the common names."""
     dns = dns or Resolver()
     started = datetime.now(timezone.utc)
     try:
@@ -560,15 +812,16 @@ def run(domain, dns=None):
         futures = {"spf": pool.submit(check_spf, dns, domain), "dmarc": pool.submit(check_dmarc, dns, domain),
                    "dnssec": pool.submit(check_dnssec, dns, domain), "caa": pool.submit(check_caa, dns, domain)}
         try:
-            results["mx"], receives_mail, _hosts = mx_future.result(timeout=max(0.1, dns.time_left()))
+            results["mx"], receives_mail, hosts = mx_future.result(timeout=max(0.1, dns.time_left()))
         except Exception:                   # noqa: BLE001 - any failure here is "couldn't check"
-            results["mx"], receives_mail = unknown("mx", *TITLES["mx"]), None
+            results["mx"], receives_mail, hosts = unknown("mx", *TITLES["mx"]), None, []
         if receives_mail is None:
-            results["mta-sts"] = unknown("mta-sts", *TITLES["mta-sts"])
-            results["tls-rpt"] = unknown("tls-rpt", *TITLES["tls-rpt"])
+            for key in ("mta-sts", "tls-rpt", "dkim"):
+                results[key] = unknown(key, *TITLES[key])
         else:
             futures["mta-sts"] = pool.submit(check_mta_sts, dns, domain, receives_mail)
             futures["tls-rpt"] = pool.submit(check_tls_rpt, dns, domain, receives_mail)
+            futures["dkim"] = pool.submit(check_dkim, dns, domain, receives_mail, hosts, selector)
         wait(futures.values(), timeout=max(0.1, dns.time_left()))
         for key, future in futures.items():
             try:
@@ -580,8 +833,8 @@ def run(domain, dns=None):
     for c in checks:
         c["group"] = GROUP_OF[c["key"]]
         if broken and c["verdict"] == "unknown":
-            c["headline"] = "Couldn't check: lookups for this domain fail because of the DNSSEC problem below."
-    return {"domain": domain, "checked_at": started.isoformat(), "checks": checks}
+            c["headline"] = "Lookups for this domain fail because of the DNSSEC problem below."
+    return {"domain": domain, "checked_at": started.isoformat(), "selector": selector, "checks": checks}
 
 
 def score(result):
@@ -592,9 +845,26 @@ def score(result):
 
 # ---------- saved results and rate limits ----------
 
-def cached(conn, domain, now=None):
+def normalize_selector(raw):
+    """A DKIM selector someone typed (the s= of a DKIM-Signature), or None. Raises ValueError."""
+    text = (raw or "").strip().lower().rstrip(".")
+    if not text:
+        return None
+    label = r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?"
+    if len(text) > 100 or not re.fullmatch(rf"{label}(?:\.{label})*", text):
+        raise ValueError("That isn't a DKIM selector. It's the s= value in an email's DKIM-Signature header, "
+                         "like selector1 or google.")
+    return text
+
+
+def cache_key(domain, selector):
+    """Where a result is saved: a check with a typed selector is kept apart from the plain one."""
+    return f"{domain} s={selector}" if selector else domain
+
+
+def cached(conn, key, now=None):
     now = now or datetime.now(timezone.utc)
-    row = conn.execute("SELECT checked_at, result FROM domain_checks WHERE domain = ?", (domain,)).fetchone()
+    row = conn.execute("SELECT checked_at, result FROM domain_checks WHERE domain = ?", (key,)).fetchone()
     if row and now - datetime.fromisoformat(row["checked_at"]) < CACHE_FOR:
         return json.loads(row["result"])
     return None
@@ -624,7 +894,7 @@ def record_check(conn, visitor, now=None):
         conn.execute("INSERT INTO domain_lookups (visitor, at) VALUES (?, ?)", (visitor, now.isoformat()))
 
 
-def save(conn, result):
+def save(conn, key, result):
     with conn:
         conn.execute("INSERT OR REPLACE INTO domain_checks (domain, checked_at, result) VALUES (?, ?, ?)",
-                     (result["domain"], result["checked_at"], json.dumps(result)))
+                     (key, result["checked_at"], json.dumps(result)))
