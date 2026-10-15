@@ -23,7 +23,7 @@ The same story from several outlets is shown once, with the other outlets listed
 - **Your stack:** if you've picked products or added watch words on `/stack`, a strip shows recent stories about them. Both stay in your browser, as on the My stack page.
 - **Being exploited now:** the week's stories about flaws on CISA's list, or that say a flaw is already being used.
 - **In the Gulf:** stories from the regional sources and any story naming a GCC country, with a map of the Gulf. The regional feeds carry a lot of vendor announcements, so their stories only appear when they're serious or about an incident, a flaw or the authorities, and the section says how many it left out.
-- **Markets**, **Where it happened** (a small map leading to `/map`), **Coming up** (approved events) and the planned weekly digest.
+- **Markets**, **Where it happened** (a small map leading to `/map`), **Coming up** (approved events) and the weekly digest.
 
 Severity reasons are written in plain words across the site: "Remote code execution" rather than `mentions 'rce'`, "Rated 9.8 out of 10" rather than `CVSS 9.8`. `score.py` keeps its exact wording for debugging the rules; `briefing.py` translates it for readers and turns Microsoft's titles ("CVE-2026-72979 Windows DHCP Server Remote Code Execution Vulnerability") into "Windows DHCP Server: remote code execution flaw".
 
@@ -341,14 +341,14 @@ The highest-ranked article leads, so the story takes its colour; the tiles count
 - **CVE mentions are indexed.** When an article's CVE IDs are found, each one is also recorded in a small `item_cves` table. A CVE's page and the "N stories on SentryFeed" counts on `/vulns` look CVEs up there instead of searching the text of every stored article: at a year's worth of articles that's about 1,900 rows read for `/vulns` instead of over a million. The counts are exact (they used to stop at 10).
 - **Most runs recheck only the last 14 days.** An article's colour depends only on its own text, its CVE scores and the scoring rules, so a normal run looks up CVE scores and rescores the articles from the last 14 days: every article a run can add, and what most pages show. A full pass rechecks every article on the run that refreshes CISA's list (once a day; CISA often adds old flaws, which can turn an old story red), whenever `score.py` or `enrich.py` changes, and at least every 24 hours. The one delay: an older article whose CVE gets its first score through a newer article updates at the next full pass. Finding articles not yet tagged uses small indexes of just those articles. At a year's worth of articles, a normal run reads about 19,000 rows instead of 256,000, which matters on Turso, where reads are counted. The totals at the end of the collector's output ("Items mentioning CVEs", "Database now holds") are printed on full passes only, since working them out reads every article.
 - **If the database can't be reached, pages say so.** Pages show an honest "couldn't read its database, reload in a minute" message with HTTP 503 (so feed readers and crawlers retry later), `/api/items` answers with a JSON error and the RSS feeds with plain text. The masthead says the database can't be reached, and the browser-only tools (password check, file check, header analyser) keep working. Once the database has failed during a request, later attempts in that request fail straight away, so a stalled database costs one 10-second wait, not several.
-- **Only rows that changed are written.** The collector rescores articles (see above), but writes one only when its colour, reason, score or exploited flag actually changed. The same goes for CISA's catalogue (only new, changed or removed flaws), the fixed list of London, Dubai and Abu Dhabi companies, stock mentions and the saved story groups. A run with no new articles now writes a couple of rows instead of rewriting the whole database (985 rows a run before, and growing with every article), which matters for the planned move to Turso, where writes are counted.
+- **Only rows that changed are written.** The collector rescores articles (see above), but writes one only when its colour, reason, score or exploited flag actually changed. The same goes for CISA's catalogue (only new, changed or removed flaws), the fixed list of London, Dubai and Abu Dhabi companies, stock mentions and the saved story groups. A run with no new articles now writes a couple of rows instead of rewriting the whole database (985 rows a run before, and growing with every article), which matters on Turso, where writes are counted.
 - **Stories are grouped by the collector, not on page visits.** Grouping took 3 to 7 seconds per page on the Pi, paid by the first visitor after every collector run (once per gunicorn worker). Now each run groups every window the pages use (24 hours, 3, 7 and 14 days, the Gulf page's articles, and the digest's last three weeks) and saves them, compressed, in the `story_groups` table. Pages read them back, and only the "5m ago" ages are worked out on each visit. A window that wasn't saved (an older digest week, or a saved copy from an older version of the code) is grouped on the spot instead, so the pages never depend on it. Within a gunicorn worker the result is also kept in memory until the collector's next run; each run records when it finished for that. (Not the database file's modification time: CVE lookups and event submissions write to it too.)
 - **Pages are compressed, except where that could leak a secret.** Gzip shrinks the map pages to about a third. The event form page is left uncompressed: it shows back what a visitor typed next to a form token, which is the setup the BREACH attack uses to guess secrets from response sizes. Vercel's CDN compresses every page by itself, with no way to exclude one (it ignores `Cache-Control: no-transform`, which was tried), so on Vercel that page is compressed too. That leaves nothing to steal: the form token is a signed timestamp anyone gets by opening the form, and with no logins or session cookies an attacker's requests carry nothing of the visitor's.
 - **systemd over cron.** It keeps the dashboard alive, restarts it on failure, starts it on boot, and logs every collector run to the journal. Both units are sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges`) so they can only write inside the project folder.
 
 ## Setup
 
-On Raspberry Pi OS Lite (64-bit), as a user named `kaido` (change the paths in `deploy/` if yours differs):
+The live site runs on Vercel, Turso and GitHub Actions (see [Hosting the site on Vercel](#hosting-the-site-on-vercel) and [Collecting with GitHub Actions](#collecting-with-github-actions) below). The steps here run everything on one machine instead, which is how it ran on the Raspberry Pi until 12 Oct 2026. On Raspberry Pi OS Lite (64-bit), as a user named `kaido` (change the paths in `deploy/` if yours differs):
 
 ```bash
 git clone https://github.com/kaid0x/sentryfeed.git ~/sentryfeed
@@ -367,6 +367,14 @@ echo 'YOUR-KEY' > .alphavantage_key && chmod 600 .alphavantage_key
 
 python collect.py          # first run
 python app.py              # dashboard on port 5000, Ctrl+C to stop
+```
+
+To keep it running on a Pi or other Linux machine:
+
+```bash
+sudo cp deploy/sentryfeed-* /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 ```
 
 ### Settings from the environment
@@ -412,14 +420,6 @@ On Vercel (where `VERCEL=1` is set), the visitor's IP for rate limits comes from
 
 Runs can also be started by hand with **Run workflow** in the Actions tab, and the site's "Updated ... ago" always shows when collection last finished. The Alpha Vantage key is an Actions secret too; it moved there from the Pi on 12 Oct, since its 25 lookups a day are per key and only one machine should use it.
 
-To run it permanently:
-
-```bash
-sudo cp deploy/sentryfeed-* /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
-```
-
 ## Known limitations
 
 - Keyword matching only understands simple negation; sarcasm or "could become a zero-day" still matches.
@@ -439,3 +439,6 @@ sudo systemctl enable --now sentryfeed-web.service sentryfeed-collect.timer
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
 - A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
+- A "Heating up" badge on the patch queue, using the news signal it already has.
+- A breach family tree: "X breached via Y" links, suggested automatically and approved by hand on the command line.
+- A feed of lookalike domains for a few dozen UAE brands, from certificate logs (crt.sh), checked daily. It would be labelled "not verified", show domains defanged and never as links, never visit the sites, drop entries after 30 days, and skip official domains. Experimental, so last.
