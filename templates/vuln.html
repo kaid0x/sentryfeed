@@ -36,6 +36,10 @@
   .stories a { font: 600 17px var(--serif); text-decoration: none; } .stories a:hover { text-decoration: underline; }
   .elsewhere { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 32px 0 0; }
   .elsewhere a { display: inline-block; padding: 10px 0; font-weight: 600; }
+  .learning article { padding: 16px 0; border-bottom: 1px solid var(--rule); }
+  .learning h3 { font: 700 20px var(--serif); margin: 0 0 8px; }
+  .learning a { display: inline-block; min-height: 44px; padding: 10px 0; box-sizing: border-box; }
+  .learning .learn-links { display: flex; flex-wrap: wrap; gap: 4px 24px; }
   .sources { margin-top: 28px; font-size: 13px; color: var(--muted); max-width: 80ch; }
 
   @media (max-width: 760px) {
@@ -119,6 +123,30 @@
     </ul>
   </section>
   {% endif %}
+
+  <section class="block learning" aria-labelledby="h-learn">
+    <h2 id="h-learn">Learn this</h2>
+    <p>Understand the kind of weakness behind this flaw. These resources teach the weakness, rather than reproduce this specific CVE. Follow the vendor's advice above to fix the affected product.</p>
+    {% for card in learning.cards %}
+    <article>
+      <h3>{{ card.title }}</h3>
+      <p>{{ card.explanation }}</p>
+      {% for label in card.labels %}<p class="src"><a href="{{ label.url }}" rel="noopener noreferrer">{{ label.id }}</a> · {{ label.sources | join('; ') }}</p>{% endfor %}
+      <p class="src">{{ card.kind }} · {{ card.preparation }}</p>
+      <div class="learn-links">
+        <a href="{{ card.url }}" rel="noopener noreferrer">{{ 'Watch the course' if card.kind == 'Video course' else 'Explore the labs' }} at {{ card.provider }}</a>
+        <a href="{{ card.prevention }}" rel="noopener noreferrer">How it is prevented</a>
+      </div>
+    </article>
+    {% endfor %}
+    {% for label in learning.unmatched %}
+    <p class="src"><a href="{{ label.url }}" rel="noopener noreferrer">{{ label.id }}</a> · {{ label.sources | join('; ') }}. We have not selected a close learning match for this label.</p>
+    {% endfor %}
+    {% if not learning.cards and not learning.unmatched %}
+    <p>{{ "Weakness details have not been collected yet. They fill in over upcoming collector runs." if learning.pending else "The saved records do not give a specific CWE weakness label, so we cannot choose a matching resource yet." }}</p>
+    {% endif %}
+    <p class="src">CWE is a catalogue of weakness types. Labels come from the sources shown and can differ or change. Resource matches reviewed 16 October 2026.</p>
+  </section>
 
   <section class="block" aria-labelledby="h-stories">
     <h2 id="h-stories">On SentryFeed</h2>

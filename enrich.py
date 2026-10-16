@@ -7,6 +7,8 @@ from pathlib import Path
 
 import requests
 
+import learn
+
 from db import get_meta, set_meta
 
 NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
@@ -58,14 +60,14 @@ MAX_REFS = 6
 
 
 def lookup(cve_id, key, timeout=20):
-    """What NVD knows about one CVE: {found, cvss, kev, description, published, refs}."""
+    """What NVD knows about one CVE: {found, cvss, kev, description, published, refs, cwes}."""
     headers = {"User-Agent": "SentryFeed/0.1"}
     if key:
         headers["apiKey"] = key
     resp = requests.get(NVD_URL, params={"cveId": cve_id}, headers=headers, timeout=timeout)
     if resp.status_code in (403, 429, 503):
         raise RateLimited(resp.status_code)
-    nothing = {"found": False, "cvss": None, "kev": False, "description": None, "published": None, "refs": []}
+    nothing = {"found": False, "cvss": None, "kev": False, "description": None, "published": None, "refs": [], "cwes": []}
     if resp.status_code == 404:
         return nothing
     resp.raise_for_status()
@@ -78,7 +80,8 @@ def lookup(cve_id, key, timeout=20):
     refs = [{"url": r["url"], "tags": sorted(FIX_TAGS & set(r.get("tags") or []))}
             for r in cve.get("references", []) if FIX_TAGS & set(r.get("tags") or [])][:MAX_REFS]
     return {"found": True, "cvss": best_score(cve.get("metrics", {})), "kev": "cisaExploitAdd" in cve,
-            "description": description, "published": cve.get("published"), "refs": refs}
+            "description": description, "published": cve.get("published"), "refs": refs,
+            "cwes": learn.nvd_labels(cve.get("weaknesses"))}
 
 
 def save_lookup(conn, cve_id, found):
@@ -94,6 +97,10 @@ def save_lookup(conn, cve_id, found):
         (cve_id, int(found["found"]), found["description"], found["cvss"], found["published"],
          json.dumps(found["refs"]), now),
     )
+    # Old cloud schemas remain usable until the collector adds the columns.
+    if get_meta(conn, "learn_schema") == "1":
+        conn.execute("UPDATE cve_details SET cwes = ? WHERE cve_id = ?",
+                     (json.dumps(found.get("cwes", [])), cve_id))
     conn.commit()
 
 

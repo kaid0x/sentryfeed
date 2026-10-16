@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 import enrich
+import learn
 from db import connect, get_meta, set_meta
 
 KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
@@ -68,17 +69,18 @@ def refresh_kev(conn):
     fresh = [(v["cveID"].upper(), v.get("vendorProject") or "", v.get("product") or "",
               v.get("vulnerabilityName") or v["cveID"], v.get("shortDescription"), v["dateAdded"],
               v.get("dueDate"), v.get("requiredAction"), int(v.get("knownRansomwareCampaignUse") == "Known"),
-              v.get("notes")) for v in rows if normalise(v.get("cveID"))]
+              v.get("notes"), json.dumps(learn.valid_ids(v.get("cwes") or []))) for v in rows if normalise(v.get("cveID"))]
     columns = ("vendor", "product", "name", "description", "date_added", "due_date", "required_action",
-               "ransomware", "notes")
+               "ransomware", "notes", "cwes")
     with conn:
         conn.executemany(
-            f"""INSERT INTO kev (cve_id, {", ".join(columns)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            f"""INSERT INTO kev (cve_id, {", ".join(columns)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(cve_id) DO UPDATE SET {", ".join(f"{c} = excluded.{c}" for c in columns)}
                 WHERE ({", ".join(columns)}) IS NOT ({", ".join(f"excluded.{c}" for c in columns)})""",
             fresh,
         )
         conn.executemany("DELETE FROM kev WHERE cve_id = ?", [(c,) for c in before - {row[0] for row in fresh}])
+    set_meta(conn, "kev_cwes_filled", "1")
     set_meta(conn, "kev_fetched", datetime.now(timezone.utc).isoformat())
     return len({normalise(v["cveID"]) for v in rows} - before) if before else 0
 
@@ -121,7 +123,11 @@ def fill_recent_kev_details(conn, log):
     key = enrich.api_key()
     pace = enrich.PACE_WITH_KEY if key else enrich.PACE_NO_KEY
     since = (today() - timedelta(days=DETAILS_FOR_NEW_KEV_DAYS)).isoformat()
-    have = {r["cve_id"] for r in conn.execute("SELECT cve_id FROM cve_details")}
+    # Empty labels may be filled by NVD later. Retry weekly within the existing budget.
+    retry_before = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    have = {r["cve_id"] for r in conn.execute(
+        "SELECT cve_id FROM cve_details WHERE cwes IS NOT NULL AND (cwes != '[]' OR checked_at >= ?)",
+        (retry_before,))}
     missing = [r["cve_id"] for r in conn.execute(
         "SELECT cve_id FROM kev WHERE date_added >= ? ORDER BY date_added DESC", (since,)) if r["cve_id"] not in have]
     news_since = (datetime.now(timezone.utc) - timedelta(days=NEWS_DAYS)).isoformat()
@@ -146,7 +152,7 @@ def fill_recent_kev_details(conn, log):
 
 def update(conn, log=print):
     """The collector's step: refresh KEV and EPSS once a day, and fill in recent KEV details."""
-    if _due(conn, "kev_fetched"):
+    if _due(conn, "kev_fetched") or not get_meta(conn, "kev_cwes_filled"):
         new = refresh_kev(conn)
         total = conn.execute("SELECT COUNT(*) FROM kev").fetchone()[0]
         log(f"KEV: {total} flaws on CISA's list" + (f", {new} new since the last download" if new else ""))

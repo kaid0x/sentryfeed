@@ -20,6 +20,7 @@ import domaincheck
 import events
 import grouping
 import ics
+import learn
 import ransomware
 import rss
 import stack
@@ -481,7 +482,7 @@ def vulnerability(cve_id):
     # title names this flaw; other outlets' headlines can cover several and aren't used).
     title = kev["name"] if kev else next((s["headline"] for s in stories if s["source"] == "Microsoft MSRC"), None)
     return render_template("vuln.html", active="vulns", cve_id=cve_id, kev=kev, details=details, score=score, title=title,
-                           note=note, stories=stories, epss_text=vulns.epss_words(score["score"]) if score else None,
+                           note=note, stories=stories, learning=learn.for_cve(details, kev), epss_text=vulns.epss_words(score["score"]) if score else None,
                            percentile_text=vulns.percentile_words(score["percentile"]) if score else None)
 
 

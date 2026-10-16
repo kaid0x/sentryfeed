@@ -183,6 +183,8 @@ CREATE INDEX IF NOT EXISTS idx_domain_lookups_at ON domain_lookups(at);
 
 # Columns added after a table was first created. Older databases get them on connect.
 ADDED_COLUMNS = {
+    "cve_details": {"cwes": "TEXT"},
+    "kev": {"cwes": "TEXT"},
     "items": {
         "kev": "INTEGER NOT NULL DEFAULT 0",
         "severity_reason": "TEXT",
@@ -204,6 +206,7 @@ def _migrate(conn):
         for name, definition in columns.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+    conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('learn_schema', '1')")
     # After the columns exist: an older database only gets these columns from the loop above.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_gulf ON items(gulf, published)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_items_geo_untagged ON items(id) WHERE where_cc IS NULL")

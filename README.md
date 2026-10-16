@@ -154,6 +154,16 @@ A CVE nobody has asked about is looked up live, from NVD and FIRST, and saved. O
 
 This product uses the NVD API but is not endorsed or certified by the NVD.
 
+## Learn this
+
+Each CVE page has a **Learn this** section: a plain explanation of the weakness, a reviewed learning resource, and prevention guidance. The first stage covers 24 topic families through 31 specific CWE labels. PortSwigger and pwn.college links are practice resources with free accounts; OpenSecurityTraining2 links are clearly labelled video courses. Each resource states useful prerequisites. These teach the weakness class, not an exploit for that particular CVE, and do not replace the vendor's patch advice.
+
+`learn.py` contains the hand-reviewed matches. A label such as SQL injection links to SQL injection resources; broad or unmatched labels get an explicit no-match message and their CWE definition. No match is guessed from the headline. NVD labels retain the contributor named in the record, and CISA KEV labels are shown separately; matching labels are combined without hiding their sources. External labels are validated and text is escaped.
+
+The collector adds nullable `cwes` columns to `cve_details` and `kev`, refreshes CISA's catalogue once for the new field, and fills older NVD records using the existing per-run lookup budget. NULL means not collected; an empty list means checked with no specific label. Empty labels are retried after seven days within the same budget. Before the first collector run, existing CVE pages and live lookups still work and explain that weakness details are pending. Page visits do not fetch learning resources or trigger extra CVE lookups for missing labels.
+
+Resource and CWE links were checked on 16 October 2026. Tested using disposable in-memory databases: old-schema lookup compatibility, repeatable migration, NVD and KEV label storage, source attribution, deduplication, invalid labels, pending/empty/unmatched states, bounded backfill, unchanged KEV rows, full CVE rendering and hostile text escaping across all 31 mappings.
+
 ## Password check
 
 `/password` tells you whether a password has appeared in a data breach, using [Have I Been Pwned's Pwned Passwords](https://haveibeenpwned.com/Passwords), without the password leaving the browser:
@@ -433,7 +443,7 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 ## Planned
 
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
-- "Learn this": stories link the kind of weakness behind them (its CWE, from NVD) to free hands-on labs, plus a page of labs matching this week's attacks.
+- Extend "Learn this" from CVE pages to story links and a page of resources matching this week's attacks; add recurring resource-link checks.
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
