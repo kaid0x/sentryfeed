@@ -156,11 +156,19 @@ This product uses the NVD API but is not endorsed or certified by the NVD.
 
 ## Learn this
 
-Each CVE page has a **Learn this** section: a plain explanation of the weakness, a reviewed learning resource, and prevention guidance. The first stage covers 24 topic families through 31 specific CWE labels. PortSwigger and pwn.college links are practice resources with free accounts; OpenSecurityTraining2 links are clearly labelled video courses. Each resource states useful prerequisites. These teach the weakness class, not an exploit for that particular CVE, and do not replace the vendor's patch advice.
+Each CVE page has a **Learn this** section: a plain explanation of the weakness, a reviewed learning resource, and prevention guidance. It covers 24 topic families through 31 specific CWE labels. PortSwigger and pwn.college links are practice resources with free accounts; OpenSecurityTraining2 links are clearly labelled video courses. Each resource states useful prerequisites. These teach the weakness class, not an exploit for that particular CVE, and do not replace the vendor's patch advice.
 
 `learn.py` contains the hand-reviewed matches. A label such as SQL injection links to SQL injection resources; broad or unmatched labels get an explicit no-match message and their CWE definition. No match is guessed from the headline. NVD labels retain the contributor named in the record, and CISA KEV labels are shown separately; matching labels are combined without hiding their sources. External labels are validated and text is escaped.
 
 The collector adds nullable `cwes` columns to `cve_details` and `kev`, refreshes CISA's catalogue once for the new field, and fills older NVD records using the existing per-run lookup budget. NULL means not collected; an empty list means checked with no specific label. Empty labels are retried after seven days within the same budget. Before the first collector run, existing CVE pages and live lookups still work and explain that weakness details are pending. Page visits do not fetch learning resources or trigger extra CVE lookups for missing labels.
+
+The **Learn this** page (`/learn`, under Community in the menu) connects the last seven days of security stories and seven calendar dates of CISA additions, including today in Dubai, to those resources. Topics are ordered by grouped news-story count, then CISA additions, not by risk. Counts deduplicate CVEs and show overlap between the two sources. Expand a topic's CVE list to inspect the original labels on each CVE page. All 24 topics remain available below, even when the week has no matches.
+
+Matching stories on the front page and feed have up to three topic links; the feed's reading panel has them too. Matching uses saved, source-attributed labels only. Page visits make no extra NVD or learning-provider requests. Missing labels reduce coverage; they never lead to guesses from headlines.
+
+`.github/workflows/learning-links.yml` checks all 60 distinct resource, prevention and CWE URLs on relevant pushes and pull requests, manually through Actions, and on Mondays at 10:17 Dubai time. GitHub can delay or miss schedules. The checker requires no secrets or database access, limits concurrency to four, retries transient failures once, and fails the job for unreachable pages, HTTPS downgrades, non-HTML responses and obvious block/login/error pages. A green check proves reachability, not unchanged teaching content or access terms; those still need human review. GitHub notification delivery depends on the account's Actions notification settings. Run locally with `python tools/check_learning_links.py`.
+
+Tested the weekly windows, overlapping sources, family deduplication, query batching, unmatched and pending data, unavailable-database response, valid topic anchors, CSP markup and link-checker failure handling using disposable databases. Browser checks use local sample stories, never production inserts.
 
 Resource and CWE links were checked on 16 October 2026. Tested using disposable in-memory databases: old-schema lookup compatibility, repeatable migration, NVD and KEV label storage, source attribution, deduplication, invalid labels, pending/empty/unmatched states, bounded backfill, unchanged KEV rows, full CVE rendering and hostile text escaping across all 31 mappings.
 
@@ -443,7 +451,6 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 ## Planned
 
 - With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
-- Extend "Learn this" from CVE pages to story links and a page of resources matching this week's attacks; add recurring resource-link checks.
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.

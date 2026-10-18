@@ -5,6 +5,8 @@
 
 {% block styles %}
 <style nonce="{{ csp_nonce }}">
+  .learn-links { padding: 0 12px; font-size: 14px; }
+  .learn-links a { display: inline-block; padding: 12px 0; min-height: 44px; box-sizing: border-box; }
   .feed-head { display: grid; grid-template-columns: 1fr auto; gap: 12px 32px; align-items: end; margin: 28px 0 18px; }
   .feed-head h1 { font: 700 clamp(30px, 4vw, 44px)/1.1 var(--serif); letter-spacing: -0.015em; margin: 0 0 6px; }
   .standfirst { font: 18px/1.5 var(--serif); margin: 0; max-width: 62ch; }
@@ -117,6 +119,7 @@
             {% if item.also %}<span>{{ ui.plural(item.also|length, "more outlet", "more outlets") }}</span>{% endif %}
           </span>
         </button>
+        {% if item.learning %}<p class="learn-links">Learn this: {% for link in item.learning %}<a href="{{ link.url }}">{{ link.title }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
       </li>
       {% endfor %}
       <li class="stack-empty" id="stack-empty" hidden>Nothing about your stack in this time window. Try a longer window, or <a href="/stack">change My stack</a>.</li>
@@ -128,6 +131,7 @@
       <p class="geo" id="d-geo" hidden></p>
       <p class="stock" id="d-stock" hidden></p>
       <p class="cves" id="d-cves"></p>
+      <p class="learn-links" id="d-learning" hidden></p>
       <p class="summary" id="d-summary"></p>
       <a class="read" id="d-link" target="_blank" rel="noopener noreferrer">Read the article</a>
       <div class="also" id="d-also" hidden>
@@ -165,6 +169,17 @@
     $("d-sev").textContent = LABELS[item.severity] + ".";
     $("d-reason").textContent = item.reason || "";
     $("d-title").textContent = item.headline;
+    const learning = $("d-learning");
+    learning.replaceChildren();
+    learning.hidden = !(item.learning || []).length;
+    if (!learning.hidden) learning.append("Learn this: ");
+    for (const [i, link] of (item.learning || []).entries()) {
+      if (i) learning.append(" · ");
+      const a = document.createElement("a");
+      a.href = link.url;
+      a.textContent = link.title;
+      learning.append(a);
+    }
 
     const meta = $("d-meta");
     meta.replaceChildren();

@@ -100,7 +100,7 @@ NAV = [
                ("Gulf Cyber Pulse", "/gulf", "gulf")]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", "/headers", "headers"), ("Domain check", "/domain", "domain")]),
-    ("Community", [("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
+    ("Community", [("Learn this", "/learn", "learn"), ("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
 ]
 
 
@@ -259,6 +259,8 @@ def group_advisories(stories, span="in the last 24 hours"):
         "summary": "",
         "also": [],
         "cves": sorted({c for s in ms for c in s["cves"]}),
+        "learning": sorted({link['title']: link for s in ms for link in s.get('learning', [])}.values(),
+                           key=lambda link: link['title'])[:3],
         "kev": int(any(s["kev"] for s in ms)),
         "where": [], "blamed": [],
         "severity_reason": "",

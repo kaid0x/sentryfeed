@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui with context %}
+{% block title %}Learn this · SentryFeed{% endblock %}
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+  .learning-page { max-width: 1000px; padding-top: 28px; }
+  .learning-page h1 { font: 700 40px var(--serif); margin-bottom: 12px; }
+  .learning-page h2 { font: 700 28px var(--serif); margin-top: 36px; }
+  .learning-page h3 { font: 700 22px var(--serif); }
+  .learning-page p { max-width: 72ch; line-height: 1.6; }
+  .learning-page article { border-top: 1px solid var(--rule); padding: 18px 0; scroll-margin-top: 24px; }
+  .learning-page .src { color: var(--muted); font-size: 14px; }
+  .learning-page a, .learning-page summary { display: inline-block; min-height: 44px; padding: 10px 0; box-sizing: border-box; }
+  .learning-page summary { display: list-item; cursor: pointer; }
+  .learning-page .links { display: flex; flex-wrap: wrap; gap: 4px 24px; }
+  .learning-page .topic-index { display: flex; flex-wrap: wrap; gap: 0 20px; }
+</style>
+{% endblock %}
+{% block body %}
+<main class="wrap learning-page">
+  <h1>Learn this</h1>
+  <p>Turn the weaknesses behind security news into something you can understand and practise. Start with a topic, explore a lab or course, then read how developers prevent it.</p>
+  {% if error %}
+  <p role="status">We could not read the learning data. Please reload in a minute.</p>
+  {% else %}
+  <section aria-labelledby="h-week">
+    <h2 id="h-week">In the last seven days</h2>
+    <p class="src">News covers the last seven days. CISA additions cover seven calendar dates, including today in Dubai. Ordered by grouped news stories, then newly listed CISA flaws. This is a learning guide, not a risk ranking.</p>
+    {% if not data.ready %}<p role="status">Weakness details are still being set up. You can explore all topics below.</p>
+    {% elif not data.total %}<p>No CVEs appeared in the selected news or CISA additions. All topics are still available below.</p>
+    {% else %}<p>{{ data.matched }} of {{ data.total }} distinct CVEs have a reviewed learning match. Others may have labels still to collect, no specific label, or a weakness we have not matched.</p>{% endif %}
+    {% for topic in data.topics %}
+    <article>
+      <h3><a href="#{{ topic.slug }}">{{ topic.title }}</a></h3>
+      <p>{{ ui.plural(topic.stories, 'news story', 'news stories') }} · {{ ui.plural(topic.news, "news CVE", "news CVEs") }} · {{ topic.kev }} newly listed by CISA. {{ ui.plural(topic.cves|length, "distinct CVE", "distinct CVEs") }} in total; the two sources can overlap.</p>
+      <details><summary>See the CVEs and their source labels</summary>
+        <ul>{% for cve in topic.cves %}<li><a href="/vulns/{{ cve }}#h-learn">{{ cve }}</a></li>{% endfor %}</ul>
+      </details>
+    </article>
+    {% else %}{% if data.ready and data.total %}<p>No reviewed topic matches the saved labels yet.</p>{% endif %}{% endfor %}
+  </section>
+  <section aria-labelledby="h-topics">
+    <h2 id="h-topics">All learning topics</h2>
+    <p>Resources teach a weakness class, not an exploit for a specific CVE. Use the affected product’s vendor advice for fixes. A CWE is an identifier for a type of weakness.</p>
+    <nav class="topic-index" aria-label="Learning topics">{% for topic in data.catalogue %}<a href="#{{ topic.slug }}">{{ topic.title }}</a>{% endfor %}</nav>
+    {% for topic in data.catalogue %}
+    <article id="{{ topic.slug }}">
+      <h3>{{ topic.title }}</h3>
+      <p>{{ topic.explanation }}</p>
+      <p class="src">{{ topic.kind }} · {{ topic.preparation }}</p>
+      <div class="links"><a href="{{ topic.url }}" rel="noopener noreferrer">{{ 'Watch the course' if topic.kind == 'Video course' else 'Explore the labs' }} at {{ topic.provider }}</a><a href="{{ topic.prevention }}" rel="noopener noreferrer">How it is prevented</a></div>
+      <p class="src">Matched labels: {% for cwe in topic.cwes %}<a href="https://cwe.mitre.org/data/definitions/{{ cwe[4:] }}.html" rel="noopener noreferrer">{{ cwe }}</a>{{ ', ' if not loop.last }}{% endfor %}</p>
+    </article>
+    {% endfor %}
+    <p class="src">Matches reviewed 16 October 2026. Automatic link checks detect unreachable pages; they cannot establish that a course’s content or access terms are unchanged.</p>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

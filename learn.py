@@ -128,3 +128,92 @@ def for_cve(details, kev):
             unmatched.append(evidence)
     pending = details.get("cwes") is None and kev.get("cwes") is None
     return {"cards": list(cards.values()), "unmatched": unmatched, "pending": pending}
+
+
+def topic_id(title):
+    return re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')
+
+
+def catalogue():
+    topics = {}
+    for cwe, family in FAMILIES.items():
+        topic = topics.setdefault(family['title'], {**family, 'slug': topic_id(family['title']), 'cwes': []})
+        topic['cwes'].append(cwe)
+    return sorted(topics.values(), key=lambda t: t['title'])
+
+
+def saved_matches(conn, cve_ids):
+    """Two indexed queries per batch; no live lookups and no dependency on a new schema."""
+    from db import get_meta
+    if get_meta(conn, 'learn_schema') != '1':
+        return {}, False
+    ids = sorted({c for c in cve_ids if isinstance(c, str) and re.fullmatch(r'CVE-\d{4}-\d{4,7}', c)})
+    details, kev = {}, {}
+    for start in range(0, len(ids), 400):
+        batch = ids[start:start + 400]
+        marks = ','.join('?' for _ in batch)
+        for table, target in [('cve_details', details), ('kev', kev)]:
+            target.update((r['cve_id'], dict(r)) for r in conn.execute(
+                f'SELECT cve_id, cwes FROM {table} WHERE cve_id IN ({marks})', batch))
+    return {c: for_cve(details.get(c), kev.get(c)) for c in ids}, True
+
+
+def story_links(cve_ids, matches):
+    counts = {}
+    for cve in set(cve_ids):
+        for card in matches.get(cve, {}).get('cards', []):
+            counts[card['title']] = counts.get(card['title'], 0) + 1
+    return [{'title': title, 'url': '/learn#' + topic_id(title)}
+            for title in sorted(counts, key=lambda t: (-counts[t], t))[:3]]
+
+
+def attach_stories(conn, stories):
+    security = [s for s in stories if s.get('severity') in ('red', 'orange', 'yellow')]
+    matches, ready = saved_matches(conn, {c for s in security for c in s.get('cves', [])})
+    for s in stories:
+        s['learning'] = story_links(s.get('cves', []), matches) if s.get('severity') in ('red', 'orange', 'yellow') else []
+    return ready
+
+
+def weekly(conn, stories, now=None):
+    """Rolling seven days; counts describe saved labels, not a vulnerability ranking."""
+    from datetime import datetime, timedelta, timezone
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(days=7)
+    selected = []
+    for s in stories:
+        if s.get('severity') not in ('red', 'orange', 'yellow'):
+            continue
+        try:
+            published = datetime.fromisoformat(s.get('published') or '')
+            if since <= published <= now:
+                selected.append(s)
+        except (ValueError, TypeError):
+            continue
+    # CISA supplies dates, not times. Use seven calendar dates, including today in Dubai.
+    from zoneinfo import ZoneInfo
+    today = now.astimezone(ZoneInfo('Asia/Dubai')).date()
+    recent = {r['cve_id'] for r in conn.execute(
+        'SELECT cve_id FROM kev WHERE date_added BETWEEN ? AND ?',
+        ((today - timedelta(days=6)).isoformat(), today.isoformat()))}
+    news = {c for s in selected for c in s.get('cves', [])}
+    matches, ready = saved_matches(conn, news | recent)
+    topics = {}
+    for cve, result in matches.items():
+        for card in result['cards']:
+            row = topics.setdefault(card['title'], {'title': card['title'], 'slug': topic_id(card['title']),
+                                                    'cves': set(), 'news': set(), 'kev': set(), 'stories': 0})
+            row['cves'].add(cve)
+            if cve in news: row['news'].add(cve)
+            if cve in recent: row['kev'].add(cve)
+    for s in selected:
+        titles = {card['title'] for c in s.get('cves', []) for card in matches.get(c, {}).get('cards', [])}
+        for title in titles: topics[title]['stories'] += 1
+    for row in topics.values():
+        row['cves'] = sorted(row['cves'])
+        row['news'] = len(row['news'])
+        row['kev'] = len(row['kev'])
+    ranked = sorted(topics.values(), key=lambda r: (-r['stories'], -r['kev'], r['title']))
+    return {'topics': ranked, 'ready': ready, 'total': len(news | recent),
+            'matched': sum(bool(r['cards']) for r in matches.values()),
+            'catalogue': catalogue()}

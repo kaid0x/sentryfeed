@@ -13,6 +13,7 @@
   {% if long and s.stock %}<span>{{ s.stock.company }} ({{ s.stock.display_ticker }}) is listed</span>{% endif %}
 </p>
 {% if s.cves and not s.get("items") %}<p class="cves">{% for c in s.cves[:4] %}<a href="/vulns/{{ c }}">{{ c }}</a>{% endfor %}{% if s.cves|length > 4 %}<span>and {{ s.cves|length - 4 }} more</span>{% endif %}</p>{% endif %}
+{% if s.learning %}<p class="learn-links">Learn this: {% for link in s.learning %}<a href="{{ link.url }}">{{ link.title }}</a>{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
 {% endmacro %}
 
 {% macro headline(s, tag="h3", cls="") %}
@@ -32,6 +33,7 @@
 
 {% block styles %}
 <style nonce="{{ csp_nonce }}">
+  .learn-links a { display: inline-block; padding: 12px 0; min-height: 44px; box-sizing: border-box; }
   .topline { font: 400 clamp(24px, 3.4vw, 36px)/1.25 var(--serif); letter-spacing: -0.01em; margin: 36px auto 0; max-width: 900px; text-align: center; text-wrap: balance; }
   .topline b { font-weight: 700; }
   .topline .n-major { color: var(--red); }

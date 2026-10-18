@@ -1,0 +1,42 @@
+name: Check learning links
+
+on:
+  schedule:
+    - cron: '17 6 * * 1' # Mondays, 10:17 Dubai time; GitHub may delay schedules.
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'learn.py'
+      - 'tools/check_learning_links.py'
+      - '.github/workflows/learning-links.yml'
+      - 'requirements.txt'
+  pull_request:
+    paths:
+      - 'learn.py'
+      - 'tools/check_learning_links.py'
+      - '.github/workflows/learning-links.yml'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: learning-links-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.13'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Check reviewed learning resources
+        run: python tools/check_learning_links.py

@@ -273,6 +273,7 @@ def home():
         conn = connect()
         try:
             upcoming = events.upcoming(conn)[:3]
+            learn.attach_stories(conn, stories)
         finally:
             conn.close()
         for e in upcoming:
@@ -293,6 +294,7 @@ def feed():
     conn = connect()
     try:
         listed = events.as_feed_items(events.upcoming(conn, within=events.SHOW_ON_FEED))
+        learn.attach_stories(conn, items)
     finally:
         conn.close()
     for item in listed:
@@ -452,6 +454,18 @@ def vulnerabilities():
     page = page_or_unavailable("vulns.html", build, active="vulns", news_days=VULN_NEWS_DAYS,
                                asked=asked, stack_names=stack.NAMES)
     return (page, 400) if asked is not None and isinstance(page, str) else page
+
+
+@app.route("/learn")
+def learning():
+    def build():
+        stories = load_items(7)
+        conn = connect()
+        try:
+            return learn.weekly(conn, stories)
+        finally:
+            conn.close()
+    return page_or_unavailable("learn.html", build, active="learn")
 
 
 @app.route("/vulns/<cve_id>")
