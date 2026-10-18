@@ -139,14 +139,19 @@ def fill_recent_kev_details(conn, log):
     missing += [r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev ORDER BY date_added DESC")
                 if r["cve_id"] not in have and r["cve_id"] not in queued]
     done = 0
+    not_found = []
     for cve_id in missing[:min(DETAILS_BUDGET, pace["budget"])]:
         try:
-            enrich.save_lookup(conn, cve_id, enrich.lookup(cve_id, key))
+            result = enrich.lookup(cve_id, key)
+            enrich.save_lookup(conn, cve_id, result)
+            if not result["found"]:
+                not_found.append((cve_id, result.get("missing_reason", "unspecified")))
         except (enrich.RateLimited, requests.RequestException) as e:
             log(f"  ! NVD: {e.__class__.__name__}; the rest next run")
             break
         done += 1
         time.sleep(pace["delay"])
+    enrich.report_missing(not_found, log)
     return done, len(missing) - done
 
 

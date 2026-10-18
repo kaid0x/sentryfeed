@@ -152,6 +152,8 @@ Every entry says what the date is: CISA's deadline for US federal agencies, not 
 
 A CVE nobody has asked about is looked up live, from NVD and FIRST, and saved. Only the CVE ID is sent; the visitor's address never leaves the Pi. Live lookups are capped at 30 per visitor per hour and 500 a day in total (counted with the same keyed hash of the IP as event submissions, never the IP itself), so a crawler can't run up the NVD key's quota.
 
+Collector logs report how many NVD lookups return no record, distinguish HTTP 404 from an empty result, and include up to three public CVE examples. GitHub Actions also shows these counts as warning annotations, without keys or request headers. A warning does not establish why a record was unavailable.
+
 This product uses the NVD API but is not endorsed or certified by the NVD.
 
 ## Learn this
@@ -166,7 +168,7 @@ The **Learn this** page (`/learn`, under Community in the menu) connects the las
 
 Matching stories on the front page and feed have up to three topic links; the feed's reading panel has them too. Matching uses saved, source-attributed labels only. Page visits make no extra NVD or learning-provider requests. Missing labels reduce coverage; they never lead to guesses from headlines.
 
-`.github/workflows/learning-links.yml` checks all 60 distinct resource, prevention and CWE URLs on relevant pushes and pull requests, manually through Actions, and on Mondays at 10:17 Dubai time. GitHub can delay or miss schedules. The checker requires no secrets or database access, limits concurrency to four, retries transient failures once, and fails the job for unreachable pages, HTTPS downgrades, non-HTML responses and obvious block/login/error pages. A green check proves reachability, not unchanged teaching content or access terms; those still need human review. GitHub notification delivery depends on the account's Actions notification settings. Run locally with `python tools/check_learning_links.py`.
+`.github/workflows/learning-links.yml` checks all 60 distinct resource, prevention and CWE URLs on relevant pushes and pull requests, manually through Actions, and on Mondays at 10:17 Dubai time. GitHub can delay or miss schedules. The checker requires no secrets or database access, limits concurrency to four, retries transient failures once, and names failing URLs in GitHub error annotations and fails the job for unreachable pages, HTTPS downgrades, non-HTML responses and obvious block/login/error pages. A green check proves reachability, not unchanged teaching content or access terms; those still need human review. GitHub notification delivery depends on the account's Actions notification settings. Run locally with `python tools/check_learning_links.py`.
 
 Tested the weekly windows, overlapping sources, family deduplication, query batching, unmatched and pending data, unavailable-database response, valid topic anchors, CSP markup and link-checker failure handling using disposable databases. Browser checks use local sample stories, never production inserts.
 
@@ -180,7 +182,7 @@ Resource and CWE links were checked on 16 October 2026. Tested using disposable 
 2. Only the first 5 of the hash's 40 characters go to SentryFeed, which relays them to Pwned Passwords and gets back every leaked hash starting with them (a few hundred, padded with fake entries so the response size gives nothing away).
 3. The browser looks for its own full hash in that list.
 
-SentryFeed relays the request instead of the browser calling Pwned Passwords directly, so visitors' IP addresses never reach HIBP and the page's security policy can forbid connections to any other site. Browsers only provide built-in hashing on HTTPS pages, so `templates/_sha1.js` is a small fallback for the Pi's plain-HTTP setup, tested against Node's SHA-1 on 5,000+ inputs.
+SentryFeed relays the request instead of the browser calling Pwned Passwords directly, so visitors' IP addresses never reach HIBP and the page's security policy can forbid connections to any other site. Password hashing uses the browser’s Web Crypto API on HTTPS (or localhost for development). If it is unavailable, the page explains how to proceed and sends no request. The retired Pi’s plain-HTTP SHA-1 fallback has been removed. Tested with ordinary, Arabic/emoji and long inputs, unavailable or failing Web Crypto, empty input, breach matches, no match and network failures; only the five-character prefix is requested. File hashing still uses the separate streaming SHA-256 implementation so large files do not have to fit in memory.
 
 ## Email header analyser
 
@@ -450,7 +452,6 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 
 ## Planned
 
-- With the Pi retired, the password check can use the browser's own hashing instead of the bundled SHA-1/SHA-256 code, which was only there because the Pi served plain HTTP. (One-click copy on `/feeds` already works over Vercel's HTTPS.)
 - An Arabic version of the site.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.

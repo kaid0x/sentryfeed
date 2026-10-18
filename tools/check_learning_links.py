@@ -5,6 +5,7 @@ A successful response proves reachability, not that the resource still teaches t
 """
 import concurrent.futures
 import html
+import os
 from pathlib import Path
 import re
 import sys
@@ -62,6 +63,10 @@ def main():
     failures = 0
     for url, (ok, detail) in zip(urls, results):
         print(f'{"OK" if ok else "FAIL"} {url}: {detail}')
+        if not ok and os.environ.get('GITHUB_ACTIONS') == 'true':
+            # Workflow command escaping keeps remote page titles inert.
+            message = f'{url}: {detail}'.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+            print(f'::error title=Learning resource needs review::{message}')
         failures += not ok
     print(f'{len(urls) - failures}/{len(urls)} reachable; {failures} need review.')
     return 1 if failures else 0

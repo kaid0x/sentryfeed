@@ -69,12 +69,12 @@ def lookup(cve_id, key, timeout=20):
         raise RateLimited(resp.status_code)
     nothing = {"found": False, "cvss": None, "kev": False, "description": None, "published": None, "refs": [], "cwes": []}
     if resp.status_code == 404:
-        return nothing
+        return {**nothing, "missing_reason": "HTTP 404"}
     resp.raise_for_status()
 
     vulns = resp.json().get("vulnerabilities") or []
     if not vulns:
-        return nothing  # reserved or not yet published in NVD
+        return {**nothing, "missing_reason": "empty response"}  # reserved or not yet published in NVD
     cve = vulns[0]["cve"]
     description = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), None)
     refs = [{"url": r["url"], "tags": sorted(FIX_TAGS & set(r.get("tags") or []))}
@@ -82,6 +82,22 @@ def lookup(cve_id, key, timeout=20):
     return {"found": True, "cvss": best_score(cve.get("metrics", {})), "kev": "cisaExploitAdd" in cve,
             "description": description, "published": cve.get("published"), "refs": refs,
             "cwes": learn.nvd_labels(cve.get("weaknesses"))}
+
+
+def report_missing(records, log=print):
+    """Summarise public CVE outcomes without logging request headers or credentials."""
+    if not records:
+        return
+    reasons = {}
+    for _, reason in records:
+        reasons[reason] = reasons.get(reason, 0) + 1
+    counts = ", ".join(f"{count} {reason}" for reason, count in sorted(reasons.items()))
+    sample = ", ".join(cve for cve, _ in records[:3])
+    message = f"NVD returned no record for {len(records)} lookups ({counts}). Examples: {sample}."
+    log(message)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        log("::warning title=NVD lookups returned no record::" + message)
 
 
 def save_lookup(conn, cve_id, found):
@@ -173,6 +189,7 @@ def lookup_pending(conn, since=None):
     pace = PACE_WITH_KEY if key else PACE_NO_KEY
     pending = cves_to_lookup(conn, since)
     done = 0
+    missing = []
 
     for cve_id in pending[: pace["budget"]]:
         try:
@@ -185,9 +202,12 @@ def lookup_pending(conn, since=None):
             break
 
         save_lookup(conn, cve_id, found)
+        if not found["found"]:
+            missing.append((cve_id, found.get("missing_reason", "unspecified")))
         done += 1
         time.sleep(pace["delay"])
 
+    report_missing(missing)
     return {"looked_up": done, "pending": len(pending) - done, "has_key": key is not None}
 
 
