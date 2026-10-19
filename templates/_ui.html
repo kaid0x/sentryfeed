@@ -22,7 +22,7 @@
 {% endmacro %}
 
 {% macro theme_button(cls="") %}
-<button type="button" class="theme-toggle {{ cls }}" id="theme-toggle">Theme</button>
+<button type="button" class="theme-toggle {{ cls }}" id="theme-toggle">{{ "المظهر" if site_lang == "ar" else "Theme" }}</button>
 {% endmacro %}
 
 {# Desktop: one dropdown per group. Phones: a single "Menu" button opening every group as a list.
@@ -36,9 +36,9 @@
 {% endmacro %}
 
 {% macro menus(nav, active) %}
-<nav class="menus" aria-label="Sections">
+<nav class="menus" aria-label="{{ 'الأقسام' if site_lang == 'ar' else 'Sections' }}">
   <ul class="menus-row">
-    <li><a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a></li>
+    <li><a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>{{ 'الرئيسية (بالإنجليزية)' if site_lang == 'ar' else 'Home' }}</a></li>
     {% for group, links in nav %}
     {% set here = active in links | map(attribute=2) | list %}
     <li class="menu">
@@ -47,9 +47,9 @@
     </li>
     {% endfor %}
   </ul>
-  <button type="button" class="menu-mobile" aria-expanded="false" aria-controls="menu-all">Menu</button>
+  <button type="button" class="menu-mobile" aria-expanded="false" aria-controls="menu-all">{{ "القائمة" if site_lang == "ar" else "Menu" }}</button>
   <div class="menu-all" id="menu-all" hidden>
-    <a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>Home</a>
+    <a class="menu-home" href="/"{% if active == "home" %} aria-current="page"{% endif %}>{{ 'الرئيسية (بالإنجليزية)' if site_lang == 'ar' else 'Home' }}</a>
     {% for group, links in nav %}
     <h2 class="menu-all-group">{{ group }}</h2>
     <ul>{{ menu_links(links, active) }}</ul>
@@ -74,8 +74,9 @@
   const theme = document.getElementById("theme-toggle");
   function showTheme() {
     const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    theme.textContent = next === "light" ? "Light" : "Dark";
-    theme.setAttribute("aria-label", "Switch to " + next + " theme");
+    const arabic = root.lang === "ar";
+    theme.textContent = arabic ? (next === "light" ? "فاتح" : "داكن") : (next === "light" ? "Light" : "Dark");
+    theme.setAttribute("aria-label", arabic ? (next === "light" ? "التبديل إلى المظهر الفاتح" : "التبديل إلى المظهر الداكن") : "Switch to " + next + " theme");
   }
   if (theme) {
     showTheme();

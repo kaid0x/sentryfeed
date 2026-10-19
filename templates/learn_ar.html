@@ -1,0 +1,44 @@
+{% extends "learn.html" %}
+{% block title %}تعلّم من الأخبار · SentryFeed{% endblock %}
+{% block body %}
+<main class="wrap learning-page">
+  <h1>تعلّم من الأخبار</h1>
+  <p>افهم نقاط الضعف وراء أخبار الأمن السيبراني وتدرّب عليها. اختر موضوعاً، واستكشف مختبراً أو دورة، ثم تعرّف إلى طرق الوقاية.</p>
+  <p class="src">هذه الصفحة متاحة بالعربية. المختبرات والدورات والمراجع وصفحات تفاصيل الثغرات المرتبطة بها باللغة الإنجليزية.</p>
+  {% if error %}
+  <p role="status">تعذّر تحميل بيانات التعلّم. أعد تحميل الصفحة بعد دقيقة.</p>
+  {% else %}
+  <section aria-labelledby="h-week">
+    <h2 id="h-week">خلال الأيام السبعة الماضية</h2>
+    <p class="src">تشمل الأخبار الأيام السبعة الماضية. وتشمل إضافات وكالة الأمن السيبراني الأمريكية <bdi lang="en" dir="ltr">CISA</bdi> سبعة أيام تقويمية، بما فيها اليوم بتوقيت دبي. تُرتّب المواضيع حسب عدد القصص الإخبارية بعد تجميع التغطيات المتشابهة، ثم حسب عدد الثغرات المضافة حديثاً إلى قائمة الوكالة. هذا دليل للتعلّم، وليس ترتيباً للمخاطر.</p>
+    {% if not data.ready %}<p role="status">لا تزال بيانات نقاط الضعف قيد الإعداد. يمكنك تصفّح جميع المواضيع أدناه.</p>
+    {% elif not data.total %}<p>لم ترد معرّفات ثغرات في الأخبار أو إضافات الوكالة ضمن هذه الفترة. لا تزال جميع المواضيع متاحة أدناه.</p>
+    {% else %}<p>عدد الثغرات التي طُوبقت بمصادر تعليمية راجعناها: <bdi>{{ data.matched }}</bdi> من أصل <bdi>{{ data.total }}</bdi>، دون تكرار. قد تكون بقية الثغرات بانتظار جمع تصنيفاتها، أو بلا تصنيف محدد، أو من نوع لم نربطه بمصدر تعليمي بعد.</p>{% endif %}
+    {% for topic in data.topics %}
+    <article>
+      <h3><a href="#{{ topic.slug }}">{{ topic.title }}</a></h3>
+      <p>القصص الإخبارية: <bdi>{{ topic.stories }}</bdi> · الثغرات المذكورة في الأخبار: <bdi>{{ topic.news }}</bdi> · الثغرات المضافة حديثاً إلى قائمة <bdi lang="en" dir="ltr">CISA</bdi>: <bdi>{{ topic.kev }}</bdi>. الإجمالي دون تكرار: <bdi>{{ topic.cves|length }}</bdi>. قد تظهر الثغرة نفسها في كلا المصدرين.</p>
+      <details><summary>عرض الثغرات ومصادر تصنيفاتها (بالإنجليزية)</summary>
+        <ul>{% for cve in topic.cves %}<li><a href="/vulns/{{ cve }}#h-learn" hreflang="en"><bdi lang="en" dir="ltr">{{ cve }}</bdi></a></li>{% endfor %}</ul>
+      </details>
+    </article>
+    {% else %}{% if data.ready and data.total %}<p>لا توجد مواضيع راجعناها تطابق التصنيفات المحفوظة حتى الآن.</p>{% endif %}{% endfor %}
+  </section>
+  <section aria-labelledby="h-topics">
+    <h2 id="h-topics">جميع مواضيع التعلّم</h2>
+    <p>تشرح هذه المصادر نوع نقطة الضعف، ولا تعيد بالضرورة استغلال ثغرة بعينها. لإصلاح المنتج المتأثر، اتبع إرشادات مورّده. يشير المعرّف <bdi lang="en" dir="ltr">CWE</bdi> إلى نوع من نقاط الضعف.</p>
+    <nav class="topic-index" aria-label="مواضيع التعلّم">{% for topic in data.catalogue %}<a href="#{{ topic.slug }}">{{ topic.title }}</a>{% endfor %}</nav>
+    {% for topic in data.catalogue %}
+    <article id="{{ topic.slug }}">
+      <h3>{{ topic.title }}</h3>
+      <p>{{ topic.explanation }}</p>
+      <p class="src">{{ topic.kind }} · {{ topic.preparation }}</p>
+      <div class="links"><a href="{{ topic.url }}" hreflang="en" rel="noopener noreferrer">{{ 'شاهد الدورة' if topic.video else 'استكشف المختبرات' }} لدى <bdi lang="en" dir="ltr">{{ topic.provider }}</bdi> (بالإنجليزية)</a><a href="{{ topic.prevention }}" hreflang="en" rel="noopener noreferrer">طرق الوقاية (بالإنجليزية)</a></div>
+      <p class="src">التصنيفات المطابقة: {% for cwe in topic.cwes %}<a href="https://cwe.mitre.org/data/definitions/{{ cwe[4:] }}.html" hreflang="en" rel="noopener noreferrer"><bdi lang="en" dir="ltr">{{ cwe }}</bdi></a>{{ '، ' if not loop.last }}{% endfor %}</p>
+    </article>
+    {% endfor %}
+    <p class="src">رُوجعت المطابقات في 16 أكتوبر 2026. تكشف الفحوص التلقائية الروابط التي يتعذّر الوصول إليها، لكنها لا تتحقق من بقاء محتوى الدورات أو شروط الوصول إليها كما كانت.</p>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}

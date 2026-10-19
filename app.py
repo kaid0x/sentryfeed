@@ -16,6 +16,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from db import DATABASE_ERRORS, ERRORS as DB_ERRORS, connect as open_database, last_collected
 from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
+import arabic
 import domaincheck
 import events
 import grouping
@@ -175,10 +176,13 @@ def inject_page_basics():
     """What every page's masthead, menus and footer need."""
     when = collected_time()
     collected = when.astimezone(briefing.DUBAI) if when else None
+    is_arabic = request.path == "/ar/learn"
     return {
+        "site_lang": "ar" if is_arabic else "en",
+        "site_date_ar": arabic.date_label(datetime.now(briefing.DUBAI)) if is_arabic else None,
         "csp_nonce": g.get("csp_nonce", ""),
-        "site_nav": briefing.NAV,
-        "site_footer": briefing.FOOTER,
+        "site_nav": arabic.navigation(briefing.NAV) if is_arabic else briefing.NAV,
+        "site_footer": [(arabic.FOOTER[label] + " (بالإنجليزية)", href) for label, href in briefing.FOOTER] if is_arabic else briefing.FOOTER,
         "site_glossary": briefing.GLOSSARY,
         "site_today": datetime.now(briefing.DUBAI),
         "site_collected": collected,
@@ -457,15 +461,17 @@ def vulnerabilities():
 
 
 @app.route("/learn")
+@app.route("/ar/learn", endpoint="learning_ar")
 def learning():
     def build():
         stories = load_items(7)
         conn = connect()
         try:
-            return learn.weekly(conn, stories)
+            data = learn.weekly(conn, stories)
+            return arabic.learning(data) if request.path == "/ar/learn" else data
         finally:
             conn.close()
-    return page_or_unavailable("learn.html", build, active="learn")
+    return page_or_unavailable("learn_ar.html" if request.path == "/ar/learn" else "learn.html", build, active="learn")
 
 
 @app.route("/vulns/<cve_id>")

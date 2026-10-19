@@ -1,6 +1,6 @@
 {% import "_ui.html" as ui with context %}
 <!doctype html>
-<html lang="en">
+<html lang="{{ site_lang|default('en') }}"{% if site_lang == "ar" %} dir="rtl"{% endif %}>
 <head>
 {{ ui.head(none, "light") }}
 <title>{% block title %}SentryFeed: security news, read and ranked{% endblock %}</title>
@@ -44,6 +44,14 @@
   .sev-red { --sev: var(--red); } .sev-orange { --sev: var(--orange); } .sev-yellow { --sev: var(--yellow); }
   .sev-green { --sev: var(--green); } .sev-blue { --sev: var(--blue); }
 
+  .language-switch { display: inline-block; min-height: 44px; padding: 10px 0; }
+  .dateline-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  html[dir="rtl"] { --serif: "Geeza Pro", "Noto Naskh Arabic", Tahoma, serif; }
+  html[dir="rtl"] .nameplate { font-family: Georgia, serif; }
+  html[dir="rtl"] .tagline { font-style: normal; }
+  html[dir="rtl"] .theme-toggle { min-height: 44px; }
+  html[dir="rtl"] .menus-row { gap: 4px 18px; }
+  html[dir="rtl"] .dateline { flex-wrap: wrap; }
   /* Masthead */
   .masthead { text-align: center; padding-top: 14px; }
   .dateline { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--rule); padding-bottom: 10px; }
@@ -58,15 +66,15 @@
   .menus-row { list-style: none; margin: 0; padding: 0; display: flex; justify-content: center; gap: 4px 28px; }
   .menus-row > li { position: relative; }
   .menu-home, .menu-button { display: inline-block; background: none; border: 0; padding: 10px 2px; min-height: 44px; font: 600 15px var(--sans); cursor: pointer; text-decoration: none; }
-  .menu-button::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-3px) rotate(45deg); }
+  .menu-button::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-inline-start: 8px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-3px) rotate(45deg); }
   .menu-button[aria-expanded="true"]::after { transform: translateY(1px) rotate(-135deg); }
-  .menu-panel { position: absolute; z-index: 5; top: 100%; left: 50%; transform: translateX(-50%); min-width: 240px; list-style: none; margin: 0; padding: 8px 0; background: var(--bg); border: 1px solid var(--ink); text-align: left; }
+  .menu-panel { position: absolute; z-index: 5; top: 100%; left: 50%; transform: translateX(-50%); min-width: 240px; list-style: none; margin: 0; padding: 8px 0; background: var(--bg); border: 1px solid var(--ink); text-align: start; }
   .menu-panel a, .menu-panel .planned, .menu-all a, .menu-all .planned { display: flex; justify-content: space-between; gap: 12px; padding: 10px 16px; text-decoration: none; }
   .menu-panel a:hover, .menu-all a:hover { background: var(--raised); }
   .planned { color: var(--muted); }
   .planned-tag { font: italic 13px var(--serif); }
   .menu-mobile { display: none; }
-  .menu-all { text-align: left; padding: 8px 0 16px; }
+  .menu-all { text-align: start; padding: 8px 0 16px; }
   .menu-all-group { font: 600 13px var(--sans); color: var(--muted); margin: 16px 16px 4px; }
   .menu-all ul { list-style: none; margin: 0; padding: 0; }
 
@@ -86,7 +94,7 @@
   button.term[aria-expanded="true"] { text-decoration-style: solid; }
   .term-tip { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: max-content; max-width: min(340px, 86vw);
               padding: 10px 12px; background: var(--bg); color: var(--ink); border: 1px solid var(--ink);
-              font: 400 15px/1.45 var(--sans); letter-spacing: 0; text-align: left; white-space: normal; }
+              font: 400 15px/1.45 var(--sans); letter-spacing: 0; text-align: start; white-space: normal; }
   .term-tip strong { font-weight: 700; }
 
   .site-footer { border-top: 3px double var(--strong-rule); margin-top: 64px; padding: 20px 0 40px; }
@@ -115,12 +123,15 @@
 <div class="wrap">
 <header class="masthead {% block masthead_class %}slim{% endblock %}">
   <div class="dateline">
-    <span>{{ site_today.strftime("%A %-d %B %Y") }}</span>
-    <span class="dateline-updated">{% if site_collected %}Updated {{ site_collected.strftime("%H:%M") }} Dubai time ({{ site_updated }}){% elif site_db_down %}Can't reach the database right now{% else %}No stories collected yet{% endif %}</span>
-    {{ ui.theme_button() }}
+    <span>{{ site_date_ar if site_lang == 'ar' else site_today.strftime("%A %-d %B %Y") }}</span>
+    <span class="dateline-updated">{% if site_lang == 'ar' %}{% if site_collected %}آخر تحديث: <bdi dir="ltr">{{ site_collected.strftime("%H:%M") }}</bdi> بتوقيت دبي{% elif site_db_down %}تعذّر الاتصال بقاعدة البيانات حالياً{% else %}لم تُجمع أخبار بعد{% endif %}{% else %}{% if site_collected %}Updated {{ site_collected.strftime("%H:%M") }} Dubai time ({{ site_updated }}){% elif site_db_down %}Can't reach the database right now{% else %}No stories collected yet{% endif %}{% endif %}</span>
+    <div class="dateline-actions">
+      {% if site_lang == 'ar' %}<a class="language-switch" href="/learn" lang="en" hreflang="en" dir="ltr">English</a>{% else %}<a class="language-switch" href="/ar/learn" lang="ar" hreflang="ar" dir="rtl">تعلّم بالعربية</a>{% endif %}
+      {{ ui.theme_button() }}
+    </div>
   </div>
-  <a class="nameplate" href="/">SentryFeed</a>
-  <p class="tagline">Security news, read and ranked every 30 minutes. Made in Dubai.</p>
+  <a class="nameplate" href="{{ '/ar/learn' if site_lang == 'ar' else '/' }}" lang="en" dir="ltr">SentryFeed</a>
+  <p class="tagline">{{ 'أخبار الأمن السيبراني، تُجمع وتُرتّب كل 30 دقيقة. صُنع في دبي.' if site_lang == 'ar' else 'Security news, read and ranked every 30 minutes. Made in Dubai.' }}</p>
   {{ ui.menus(site_nav, active) }}
 </header>
 </div>
