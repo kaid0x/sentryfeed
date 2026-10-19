@@ -174,15 +174,6 @@ Tested the weekly windows, overlapping sources, family deduplication, query batc
 
 Resource and CWE links were checked on 16 October 2026. Tested using disposable in-memory databases: old-schema lookup compatibility, repeatable migration, NVD and KEV label storage, source attribution, deduplication, invalid labels, pending/empty/unmatched states, bounded backfill, unchanged KEV rows, full CVE rendering and hostile text escaping across all 31 mappings.
 
-## Arabic learning page
-
-`/ar/learn` is the first Arabic page, reached through **تعلّم بالعربية** in the masthead. It translates all 24 learning topics, explanations, prerequisites, weekly counts, navigation, theme controls, dates and empty/error states. The **English** link returns to `/learn`. Other site pages and external courses remain English and are labelled accordingly; this is not a translation of the entire site.
-
-The Arabic view uses the same saved weakness matches, counts, topic anchors and resource URLs as English. `arabic.py` contains the presentation text; `templates/learn_ar.html` shares the English page's styling. When adding a topic or changing its meaning, format or prerequisites in `learn.py`, update its Arabic entry in the same change. Source records and provider names are not automatically translated, and there is no translation service or extra network request.
-
-The page declares `lang="ar"` and `dir="rtl"`, isolates CVE/CWE identifiers and provider names, and uses local system fonts and direction-aware alignment. Tested translation coverage, unchanged counts and URLs, escaping, unique anchors, CSP markup, populated/empty/pending/error states and ten English routes. Browser checks covered 320px and 390px layouts, desktop, both themes, menu opening and Escape, language switching and topic navigation. Arabic home and feed pages remain future work.
-
-
 ## Password check
 
 `/password` tells you whether a password has appeared in a data breach, using [Have I Been Pwned's Pwned Passwords](https://haveibeenpwned.com/Passwords), without the password leaving the browser:
@@ -461,7 +452,6 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 
 ## Planned
 
-- Extend Arabic beyond Learn this, starting with the home page and feed; retain original headlines and label their language.
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
 - A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
