@@ -925,6 +925,11 @@ def domain_check():
     return resp
 
 
+@app.route("/storage")
+def password_storage():
+    return render_template("storage.html", active="storage")
+
+
 @app.route("/campaign")
 def campaign_workbench():
     return render_template("campaign.html", active="campaign")

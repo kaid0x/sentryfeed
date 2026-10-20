@@ -464,13 +464,18 @@ The bundled official Enterprise ATT&CK 19.2 catalogue has 697 active techniques/
 
 Tested with 25 isolated JavaScript behaviour checks, six route/asset renders with outbound requests blocked, catalogue/CSP checks, and browser evidence selection, review and project round-trip. A fictional layer opened in official Navigator with its original ATT&CK version retained. Live deployment remains to be checked after the user pushes.
 
+## Password-storage checker
+
+`/storage` (Tools) reviews your own CSV/JSON export in the browser. Select the stored-password column and optional separate salt column to see recognised formats, cost settings, salt presence and repeated observed salts. A fictional six-row sample is included. Nothing is uploaded or automatically persisted; downloaded summaries exclude identities, hashes and salts.
+
+Supported formats include Argon2 PHC/Django, bcrypt/Django, Django PBKDF2 and scrypt, and explicit Werkzeug PBKDF2/scrypt layouts. Bare hexadecimal values stay unidentified. Results describe visible records, never certify password security or estimate cracking time. There is no password verification, guessing, recovery or cracking-tool export. See [research, supported formats, limits and tests](docs/password-storage.md). Tested with 62 format/parser/aggregate checks and browser sample/download checks.
+
 ## Planned
 
 - Full-site Arabic translation, including headlines and summaries, remains a future addition. Any provider must fit the zero-spending requirement.
 
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
-- A "check your own password storage" tool for companies: drop in an export of your own user table and the browser reports which hashing method it uses, whether it's salted, and how exposed the accounts would be if it leaked. Like the file check, nothing is uploaded. It must be built so it can't double as a tool for cracking dumps found online, and a fictional sample dump (a separate breach-lab project) would be its demo.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
 - A "Heating up" badge on the patch queue, using the news signal it already has.
 - A breach family tree: "X breached via Y" links, suggested automatically and approved by hand on the command line.

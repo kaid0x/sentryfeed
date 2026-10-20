@@ -100,7 +100,8 @@ NAV = [
                ("Gulf Cyber Pulse", "/gulf", "gulf")]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", "/headers", "headers"), ("Domain check", "/domain", "domain"),
-               ("Campaign workbench", "/campaign", "campaign")]),
+               ("Campaign workbench", "/campaign", "campaign"),
+               ("Password storage", "/storage", "storage")]),
     ("Community", [("Learn this", "/learn", "learn"), ("Events", "/events", "events"), ("Submit an event", "/events/submit", "submit")]),
 ]
 
