@@ -97,7 +97,7 @@ NAV = [
                ("My stack", "/stack", "stack"), ("Vulnerabilities", "/vulns", "vulns"),
                ("Patch this first", "/patch", "patch"), ("Vendor track record", "/vendors", "vendors"),
                ("Ransomware stats", "/ransomware", "ransomware"), ("Weekly digest", "/digest", "digest"),
-               ("Gulf Cyber Pulse", "/gulf", "gulf")]),
+               ("Gulf Cyber Pulse", "/gulf", "gulf"), ("Breach family tree", "/breaches", "breaches")]),
     ("Tools", [("Password check", "/password", "password"), ("File & link check", "/scan", "scan"),
                ("Email header analyser", "/headers", "headers"), ("Domain check", "/domain", "domain"),
                ("Campaign workbench", "/campaign", "campaign"),

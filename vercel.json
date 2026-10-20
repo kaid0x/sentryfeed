@@ -3,7 +3,7 @@
   "regions": ["bom1"],
   "functions": {
     "app.py": {
-      "excludeFiles": "{evidence/**,deploy/**,docs/**,tools/**,venv/**,.venv/**,**/__pycache__/**,*.db,*.db-*,.nvd_api_key,.alphavantage_key,.sec_contact,.flask_secret,.ransomware_key,CLAUDE.md,.claude/**}"
+      "excludeFiles": "{evidence/**,.breach-review/**,deploy/**,docs/**,tools/**,venv/**,.venv/**,**/__pycache__/**,*.db,*.db-*,.nvd_api_key,.alphavantage_key,.sec_contact,.flask_secret,.ransomware_key,CLAUDE.md,.claude/**}"
     }
   }
 }

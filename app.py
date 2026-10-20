@@ -16,6 +16,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from db import DATABASE_ERRORS, ERRORS as DB_ERRORS, connect as open_database, last_collected
 from grouping import RANK, SEVERITIES, ago, safe_link
 import briefing
+import breaches
 import domaincheck
 import events
 import grouping
@@ -923,6 +924,15 @@ def domain_check():
     resp = make_response(render_template("domain.html", **page))
     resp.headers["X-Robots-Tag"] = "noindex"     # results are for whoever asked, not for search engines
     return resp
+
+
+@app.route("/breaches")
+def breach_family_tree():
+    try:
+        view = breaches.page(breaches.load())
+    except (OSError, ValueError, TypeError):
+        return render_template("breaches.html", catalogue_error=True, active="breaches"), 503
+    return render_template("breaches.html", **view, active="breaches")
 
 
 @app.route("/storage")

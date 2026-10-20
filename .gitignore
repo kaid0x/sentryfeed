@@ -10,3 +10,6 @@ venv/
 __pycache__/
 
 tools/node_modules/
+
+# Private, unreviewed incident leads
+.breach-review/

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "nodes": [
+    {
+      "id": "okta-support-2023",
+      "title": "Okta support-system incident",
+      "organisation": "Okta",
+      "aliases": ["Okta"],
+      "period": "2023-10",
+      "summary": "Okta reported unauthorised access to its customer-support system and files supplied with support cases. The support system was separate from its production identity service.",
+      "sources": [{"label": "Okta disclosure", "url": "https://sec.okta.com/articles/2023/10/tracking-unauthorized-access-oktas-support-system/"}]
+    },
+    {
+      "id": "cloudflare-okta-october-2023",
+      "title": "Cloudflare identity access, contained",
+      "organisation": "Cloudflare",
+      "aliases": ["Cloudflare"],
+      "period": "2023-10",
+      "summary": "Cloudflare reported access to its Okta environment using a stolen support-case session token. It contained the access and reported no impact to customer information or systems.",
+      "sources": [{"label": "Cloudflare October incident report", "url": "https://blog.cloudflare.com/how-cloudflare-mitigated-yet-another-okta-compromise/"}]
+    },
+    {
+      "id": "cloudflare-atlassian-november-2023",
+      "title": "Cloudflare internal Atlassian incident",
+      "organisation": "Cloudflare",
+      "aliases": ["Cloudflare"],
+      "period": "2023-11",
+      "summary": "Cloudflare reported unauthorised access to internal documentation and source-code systems. It attributed initial access to credentials stolen during the earlier Okta incident that it had not rotated.",
+      "sources": [{"label": "Cloudflare November incident report", "url": "https://blog.cloudflare.com/thanksgiving-2023-security-incident/"}]
+    }
+  ],
+  "links": [
+    {
+      "id": "okta-cloudflare-october",
+      "from": "okta-support-2023",
+      "to": "cloudflare-okta-october-2023",
+      "mechanism": "session-token-reuse",
+      "outcome": "contained-access",
+      "summary": "Cloudflare connected the October access to a session token taken from an Okta support case.",
+      "scope": "Contained access is not the same as a customer-data breach. This connection describes Cloudflare's reported identity-environment incident.",
+      "reviewed": "2026-10-20",
+      "sources": [{"label": "Cloudflare explains the connection", "url": "https://blog.cloudflare.com/how-cloudflare-mitigated-yet-another-okta-compromise/"}]
+    },
+    {
+      "id": "okta-cloudflare-november",
+      "from": "okta-support-2023",
+      "to": "cloudflare-atlassian-november-2023",
+      "mechanism": "stolen-credential-reuse",
+      "outcome": "reported-compromise",
+      "summary": "Cloudflare said credentials stolen during the Okta compromise were later used to enter its internal Atlassian environment.",
+      "scope": "Cloudflare reported no customer-data or customer-system impact. It did not attribute this to a breach of Atlassian or the other vendors whose service credentials were involved.",
+      "reviewed": "2026-10-20",
+      "sources": [{"label": "Cloudflare explains the connection and limits", "url": "https://blog.cloudflare.com/thanksgiving-2023-security-incident/"}]
+    }
+  ]
+}

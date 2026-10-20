@@ -470,6 +470,12 @@ Tested with 25 isolated JavaScript behaviour checks, six route/asset renders wit
 
 Supported formats include Argon2 PHC/Django, bcrypt/Django, Django PBKDF2 and scrypt, and explicit Werkzeug PBKDF2/scrypt layouts. Bare hexadecimal values stay unidentified. Results describe visible records, never certify password security or estimate cracking time. There is no password verification, guessing, recovery or cracking-tool export. See [research, supported formats, limits and tests](docs/password-storage.md). Tested with 62 format/parser/aggregate checks and browser sample/download checks.
 
+## Breach family tree
+
+`/breaches` (Intel) shows source-reviewed connections between incidents, with the access mechanism, reported outcome, scope limits and evidence links. It starts with three incident records and two reviewed connections from first-party Okta/Cloudflare reports. Contained access and internal compromise are distinguished, and customer impact is not inferred.
+
+The page reads `data/breaches.json`, needs no JavaScript or extra database table, and makes no external requests. A local review command can suggest private co-mention leads from saved stories involving known organisations; these never become public connections automatically. Explicit approval validates the complete graph before atomically updating the local catalogue. See [research, editorial workflow and tests](docs/breach-family-tree.md). Eighteen test cases cover validation, private suggestions, atomic approval, escaping and error states.
+
 ## Planned
 
 - Full-site Arabic translation, including headlines and summaries, remains a future addition. Any provider must fit the zero-spending requirement.
@@ -478,5 +484,4 @@ Supported formats include Argon2 PHC/Django, bcrypt/Django, Django PBKDF2 and sc
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
 - A "Heating up" badge on the patch queue, using the news signal it already has.
-- A breach family tree: "X breached via Y" links, suggested automatically and approved by hand on the command line.
-- A feed of lookalike domains for a few dozen UAE brands, from certificate logs (crt.sh), checked daily. It would be labelled "not verified", show domains defanged and never as links, never visit the sites, drop entries after 30 days, and skip official domains. Experimental, so last.
+- A feed of lookalike domains for a few dozen UAE brands, from certificate logs (crt.sh), checked daily. It would be labelled "not verified", show domains defanged and never as links, never visit the sites, drop entries after 30 days, and skip official domains. Experimental; usefulness and review workload are still under discussion.
