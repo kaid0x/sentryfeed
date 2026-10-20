@@ -483,5 +483,4 @@ The page reads `data/breaches.json`, needs no JavaScript or extra database table
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.
 - Later: email breach checks and opt-in alerts via HIBP, with a confirmation link before any email is stored.
-- A "Heating up" badge on the patch queue, using the news signal it already has.
 - A feed of lookalike domains for a few dozen UAE brands, from certificate logs (crt.sh), checked daily. It would be labelled "not verified", show domains defanged and never as links, never visit the sites, drop entries after 30 days, and skip official domains. Experimental; usefulness and review workload are still under discussion.
