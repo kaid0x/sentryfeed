@@ -454,6 +454,16 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 - Collection depends on the outside services visiting `/tasks/collect` and on GitHub Actions accepting the run. If both services stop, or GitHub stops, collection stops; the masthead's "Updated ... ago" shows it, and after 2 hours the page reports a failure, which the services email about.
 - Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
+## Campaign workbench
+
+`/campaign` (Tools) helps analyse campaign reports against MITRE ATT&CK. Paste report text, select an evidence passage, search techniques, choose the supported objective, and explain the mapping before marking it reviewed. Explicit technique IDs can be collected as drafts. The tool does not infer an APT actor, attack order or detection coverage.
+
+Everything stays in the tab until the user downloads a project or a reviewed-only Navigator layer. There is no paid API, report upload or automatic persistence. Project files preserve the report, evidence, citations and notes; save one before closing. Imports validate atomically against the pinned ATT&CK snapshot. Changing report text removes mappings with changed evidence and makes retained mappings drafts; changing a rationale or objective also requires review again.
+
+The bundled official Enterprise ATT&CK 19.2 catalogue has 697 active techniques/sub-techniques, version and source-commit provenance, and the required MITRE licence. It is a pinned snapshot; Navigator may offer an upgrade to a newer release. Source text is rendered safely under the existing CSP. The catalogue is built offline using `python tools/build_attack_catalogue.py`, with no build step on Vercel. See [design, research, limits and maintenance](docs/campaign-workbench.md).
+
+Tested with 25 isolated JavaScript behaviour checks, six route/asset renders with outbound requests blocked, catalogue/CSP checks, and browser evidence selection, review and project round-trip. A fictional layer opened in official Navigator with its original ATT&CK version retained. Live deployment remains to be checked after the user pushes.
+
 ## Planned
 
 - Full-site Arabic translation, including headlines and summaries, remains a future addition. Any provider must fit the zero-spending requirement.

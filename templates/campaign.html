@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Campaign workbench · SentryFeed{% endblock %}
+{% block styles %}
+<style nonce="{{ csp_nonce }}">
+.campaign {padding-top:28px;padding-bottom:50px}.campaign h1{font:700 clamp(30px,5vw,46px)/1.15 var(--serif);margin:0 0 12px}.campaign h2{font:700 25px var(--serif)}.intro{max-width:75ch}.print-only{display:none}.work-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}.campaign label{display:block;font-weight:600;margin-top:14px}.campaign input,.campaign textarea,.campaign select{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--muted);padding:10px;font:inherit;min-height:44px}.campaign textarea{resize:vertical}.campaign input.sr-only{width:1px;min-height:0;padding:0;border:0}.campaign button,.campaign .file-label{min-height:44px;padding:9px 14px;background:var(--raised);color:var(--ink);border:1px solid var(--ink);font:inherit;cursor:pointer}.actions{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.campaign .file-label{margin:0;font-weight:400}.mapping,.result{border-top:1px solid var(--rule);padding:14px 0;overflow-wrap:anywhere}.mapping h3,.result h3{margin:0 0 6px;font:700 20px var(--serif)}.result p{margin:5px 0}.muted{color:var(--muted)}#status{min-height:1.6em}#results{max-height:500px;overflow:auto}.campaign blockquote{margin:10px 0;padding-left:14px;border-left:3px solid var(--muted);white-space:pre-wrap}.campaign details{margin:14px 0}.campaign summary{cursor:pointer;min-height:44px;padding:10px 0}.campaign section{min-width:0}.campaign a{overflow-wrap:anywhere}.campaign small{display:block}.campaign .invalid{color:var(--red)}@media(max-width:760px){.work-grid{grid-template-columns:1fr;gap:12px}}@media print{.print-only{display:block}.work-grid,.mapping textarea,.mapping select,.mapping label,.no-print,.masthead,footer{display:none!important}.campaign{color:#000;background:#fff}.mapping{break-inside:avoid}.mapping a::after{content:" (" attr(href) ")"}}
+</style>
+{% endblock %}
+{% block body %}
+<main class="wrap campaign">
+<h1>Campaign workbench</h1>
+<p class="intro">Turn a campaign report into an evidence-backed MITRE ATT&amp;CK® analysis. Select a passage, choose the behaviour it supports, and explain your mapping.</p>
+<p class="intro muted">Your report and analysis stay in this browser tab. Save a project file to keep your work; nothing is saved automatically or uploaded. External source links open only when you click them.</p>
+<noscript><p>This tool needs JavaScript. Your report will not be submitted.</p></noscript>
+<p id="status" role="status" aria-live="polite">Loading the local ATT&amp;CK catalogue…</p>
+<div class="actions no-print">
+<button id="sample" type="button">Try a fictional example</button>
+<button id="save" type="button" disabled>Save project</button>
+<label class="file-label" for="import">Open project</label><input id="import" type="file" accept=".json,application/json" class="sr-only">
+<button id="navigator" type="button" disabled>Export reviewed to Navigator</button>
+<button id="print" type="button">Print analysis</button><button id="clear" type="button">Clear work</button>
+</div>
+<div class="work-grid">
+<section aria-labelledby="report-heading">
+<h2 id="report-heading">1. Read the evidence</h2>
+<label for="project-title">Analysis title</label><input id="project-title" maxlength="200" autocomplete="off">
+<label for="source">Report source URL (optional)</label><input id="source" type="url" maxlength="2000" placeholder="https://…" autocomplete="off">
+<label for="report">Report text</label><textarea id="report" rows="14" maxlength="200000" spellcheck="false" autocomplete="off" aria-describedby="report-help"></textarea>
+<small id="report-help">Paste up to 200,000 characters. Select a passage, then use it as evidence. Changing the report later makes existing mappings drafts.</small>
+<div class="actions"><button type="button" id="capture">Use selected passage</button><button type="button" id="find-ids">Find explicit technique IDs</button></div>
+<details><summary>How to map responsibly</summary><p>Map what the report describes, rather than what a group usually does. An explicit technique ID is a lead, not a reviewed finding. Choose a sub-technique only when the evidence supports that detail.</p><p>Tactics describe objectives. Their display order does not prove the order of an attack. Technique overlap does not establish attribution. Reviewed means you checked a mapping; it is not independent verification.</p><p>This first version covers Enterprise ATT&amp;CK. It does not infer actors, generate detection rules, or claim defensive coverage.</p><a href="https://www.cisa.gov/news-events/news/best-practices-mitre-attckr-mapping" target="_blank" rel="noopener noreferrer">CISA mapping guidance</a></details>
+</section>
+<section aria-labelledby="map-heading"><h2 id="map-heading">2. Map the behaviour</h2>
+<label for="evidence">Evidence excerpt</label><textarea id="evidence" rows="4" maxlength="10000" readonly></textarea>
+<label for="search">Search techniques by name, ID or description</label><input id="search" type="search" maxlength="200" autocomplete="off" disabled>
+<label for="tactic-filter">Filter by tactic</label><select id="tactic-filter"><option value="">All tactics</option></select>
+<p id="result-count" class="muted"></p><div id="results"></div>
+</section></div>
+<p id="print-title" class="print-only"></p><section aria-labelledby="analysis-heading"><h2 id="analysis-heading">3. Review your analysis</h2><p id="summary">No mappings yet.</p><p class="muted">Only reviewed mappings enter the Navigator export. Project files include drafts and the report text.</p><div id="mappings"></div></section>
+<p class="muted" id="catalogue-meta"></p>
+<p class="muted">ATT&amp;CK content: © 2026 The MITRE Corporation. This work is reproduced and distributed with the permission of The MITRE Corporation. <a href="/static/attack-LICENSE.txt">Licence and limitations</a>. SentryFeed is an independent tool.</p>
+</main>
+{% endblock %}
+{% block scripts %}<script nonce="{{ csp_nonce }}" src="/static/campaign.js"></script>{% endblock %}

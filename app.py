@@ -925,6 +925,11 @@ def domain_check():
     return resp
 
 
+@app.route("/campaign")
+def campaign_workbench():
+    return render_template("campaign.html", active="campaign")
+
+
 @app.route("/scan")
 def scan():
     return render_template("scan.html")
