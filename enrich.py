@@ -59,29 +59,116 @@ FIX_TAGS = {"Patch", "Vendor Advisory", "Mitigation"}
 MAX_REFS = 6
 
 
+class NVDKeyRejected(requests.RequestException):
+    """NVD explicitly rejected the configured key; no response text or key is logged."""
+
+
+class NVDResponseError(requests.RequestException):
+    """An HTTP success did not contain a valid single-CVE response."""
+
+
 def lookup(cve_id, key, timeout=20):
-    """What NVD knows about one CVE: {found, cvss, kev, description, published, refs, cwes}."""
+    """Only a valid HTTP 200 empty result means NVD has no record.
+
+    NVD also uses HTTP 404 for an invalid API key. Never cache that as a missing CVE.
+    """
     headers = {"User-Agent": "SentryFeed/0.1"}
     if key:
         headers["apiKey"] = key
     resp = requests.get(NVD_URL, params={"cveId": cve_id}, headers=headers, timeout=timeout)
+    if "invalid apikey" in resp.headers.get("message", "").lower():
+        raise NVDKeyRejected("NVD rejected NVD_API_KEY; replace the key in the service settings.")
     if resp.status_code in (403, 429, 503):
         raise RateLimited(resp.status_code)
-    nothing = {"found": False, "cvss": None, "kev": False, "description": None, "published": None, "refs": [], "cwes": []}
-    if resp.status_code == 404:
-        return {**nothing, "missing_reason": "HTTP 404"}
     resp.raise_for_status()
+    if resp.status_code != 200:
+        raise NVDResponseError("Unexpected NVD response status")
+    try:
+        payload = resp.json()
+        if not isinstance(payload, dict):
+            raise ValueError()
+        total, vulns = payload.get("totalResults"), payload.get("vulnerabilities")
+        if type(total) is not int or total not in (0, 1) or not isinstance(vulns, list) or len(vulns) != total:
+            raise ValueError()
+        if total == 0:
+            return {"found": False, "cvss": None, "kev": False, "description": None,
+                    "published": None, "refs": [], "cwes": [], "missing_reason": "validated empty response"}
+        cve = vulns[0]["cve"]
+        if cve.get("id") != cve_id:
+            raise ValueError()
+        descriptions, references = cve.get("descriptions"), cve.get("references")
+        if not isinstance(descriptions, list) or not descriptions or not isinstance(references, list):
+            raise ValueError()
+        if any(not isinstance(d, dict) or not isinstance(d.get("lang"), str)
+               or not isinstance(d.get("value"), str) for d in descriptions):
+            raise ValueError()
+        for reference in references:
+            if not isinstance(reference, dict) or not isinstance(reference.get("url"), str):
+                raise ValueError()
+            tags = reference.get("tags", [])
+            if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
+                raise ValueError()
+        published = cve.get("published")
+        if not isinstance(published, str):
+            raise ValueError()
+        datetime.fromisoformat(published)
+        metrics = cve.get("metrics", {})
+        if not isinstance(metrics, dict):
+            raise ValueError()
+        score = best_score(metrics)
+        if score is not None and (type(score) not in (int, float) or not 0 <= score <= 10):
+            raise ValueError()
+        weaknesses = cve.get("weaknesses", [])
+        if not isinstance(weaknesses, list):
+            raise ValueError()
+        for weakness in weaknesses:
+            if not isinstance(weakness, dict) or not isinstance(weakness.get("description"), list):
+                raise ValueError()
+            if any(not isinstance(d, dict) or not isinstance(d.get("value"), str)
+                   for d in weakness["description"]):
+                raise ValueError()
+        description = next((d["value"] for d in descriptions if d["lang"] == "en"), None)
+        refs = [{"url": r["url"], "tags": sorted(FIX_TAGS & set(r.get("tags") or []))}
+                for r in cve.get("references", []) if FIX_TAGS & set(r.get("tags") or [])][:MAX_REFS]
+        return {"found": True, "cvss": score, "kev": "cisaExploitAdd" in cve,
+                "description": description, "published": cve.get("published"), "refs": refs,
+                "cwes": learn.nvd_labels(cve.get("weaknesses"))}
+    except (ValueError, TypeError, KeyError, AttributeError):
+        raise NVDResponseError("Malformed or mismatched NVD response; existing data was not changed") from None
 
-    vulns = resp.json().get("vulnerabilities") or []
-    if not vulns:
-        return {**nothing, "missing_reason": "empty response"}  # reserved or not yet published in NVD
-    cve = vulns[0]["cve"]
-    description = next((d["value"] for d in cve.get("descriptions", []) if d.get("lang") == "en"), None)
-    refs = [{"url": r["url"], "tags": sorted(FIX_TAGS & set(r.get("tags") or []))}
-            for r in cve.get("references", []) if FIX_TAGS & set(r.get("tags") or [])][:MAX_REFS]
-    return {"found": True, "cvss": best_score(cve.get("metrics", {})), "kev": "cisaExploitAdd" in cve,
-            "description": description, "published": cve.get("published"), "refs": refs,
-            "cwes": learn.nvd_labels(cve.get("weaknesses"))}
+
+def report_key_rejected(log=print):
+    message = "NVD rejected NVD_API_KEY. Replace it in GitHub Actions and check the Vercel setting separately. Existing CVE data was kept."
+    log(message)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        log("::error title=NVD API key rejected::" + message)
+
+
+def deferred_lookups(conn):
+    """Shared by both collector lookup paths; retry twice, then require review."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+    return {r["cve_id"] for r in conn.execute(
+        "SELECT cve_id FROM nvd_recheck_attempts WHERE failures >= 3 OR attempted_at >= ?", (cutoff,))}
+
+
+def defer_lookup(conn, cve_id, log=print):
+    conn.execute("INSERT INTO nvd_recheck_attempts(cve_id, attempted_at, failures) VALUES (?, ?, 1) "
+                 "ON CONFLICT(cve_id) DO UPDATE SET attempted_at=excluded.attempted_at, failures=failures+1",
+                 (cve_id, datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+    failures = conn.execute("SELECT failures FROM nvd_recheck_attempts WHERE cve_id=?", (cve_id,)).fetchone()[0]
+    action = "paused for manual review after three failures" if failures >= 3 else "deferred for 24 hours"
+    log(f"  ! NVD could not validate {cve_id}; data kept, {action}")
+
+
+def record_failure(exc):
+    return isinstance(exc, NVDResponseError) or (isinstance(exc, requests.HTTPError)
+            and exc.response is not None and exc.response.status_code == 404)
+
+
+def clear_deferred(conn, cve_id):
+    conn.execute("DELETE FROM nvd_recheck_attempts WHERE cve_id=?", (cve_id,))
+    conn.commit()
 
 
 def report_missing(records, log=print):
@@ -188,20 +275,30 @@ def lookup_pending(conn, since=None):
     key = api_key()
     pace = PACE_WITH_KEY if key else PACE_NO_KEY
     pending = cves_to_lookup(conn, since)
+    deferred = deferred_lookups(conn)
+    eligible = [cve for cve in pending if cve not in deferred]
     done = 0
     missing = []
 
-    for cve_id in pending[: pace["budget"]]:
+    for cve_id in eligible[: pace["budget"]]:
         try:
             found = lookup(cve_id, key)
+        except NVDKeyRejected:
+            report_key_rejected()
+            break
         except RateLimited as e:
             print(f"  ! NVD rate limit ({e}); the rest will be looked up next run")
             break
         except requests.RequestException as e:
+            if record_failure(e):
+                defer_lookup(conn, cve_id)
+                time.sleep(pace["delay"])
+                continue
             print(f"  ! NVD unreachable ({e}); the rest will be looked up next run")
             break
 
         save_lookup(conn, cve_id, found)
+        clear_deferred(conn, cve_id)
         if not found["found"]:
             missing.append((cve_id, found.get("missing_reason", "unspecified")))
         done += 1

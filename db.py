@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS cve_cache (
     checked_at  TEXT NOT NULL
 );
 
+-- Collector-only retry ordering. Failures never alter the saved CVE contents.
+CREATE TABLE IF NOT EXISTS nvd_recheck_attempts (
+    cve_id TEXT PRIMARY KEY,
+    attempted_at TEXT NOT NULL,
+    failures INTEGER NOT NULL DEFAULT 1
+);
+
 -- Stock impact (stocks.py). Public data only: the SEC's list of listed companies,
 -- their breach filings, and daily closing prices.
 CREATE TABLE IF NOT EXISTS companies (

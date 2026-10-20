@@ -152,7 +152,11 @@ Every entry says what the date is: CISA's deadline for US federal agencies, not 
 
 A CVE nobody has asked about is looked up live, from NVD and FIRST, and saved. Only the CVE ID is sent; the visitor's address never leaves the Pi. Live lookups are capped at 30 per visitor per hour and 500 a day in total (counted with the same keyed hash of the IP as event submissions, never the IP itself), so a crawler can't run up the NVD key's quota.
 
-Collector logs report how many NVD lookups return no record, distinguish HTTP 404 from an empty result, and include up to three public CVE examples. GitHub Actions also shows these counts as warning annotations, without keys or request headers. A warning does not establish why a record was unavailable.
+NVD lookups only save “not found” after a valid HTTP 200 response with `totalResults: 0` and an empty vulnerability list. HTTP errors, invalid JSON, inconsistent counts and records for the wrong CVE leave existing data untouched. NVD uses HTTP 404 for rejected API keys too; an explicit invalid-key response now produces an actionable GitHub annotation instead of a negative CVE record. Keys and request headers are never logged. Valid empty responses are summarised with up to three public CVE examples.
+
+On the first collector run with this fix, `nvd_negative_recheck_before` records a fixed recovery cutoff. Negative records older than that cutoff are queued for revalidation, prioritising recent KEV additions and news, then the remaining KEV catalogue and older negatives. Nothing is bulk-deleted or reset. Each valid lookup replaces just its own record; failures leave it queued. The collector creates `nvd_recheck_attempts` to defer malformed-record and non-authentication 404 failures for 24 hours, so one bad record cannot block the backlog. After three failed attempts, that CVE is paused for manual review; its stored data is retained. A successful retry clears its failure history. Authentication, rate-limit and service-wide failures stop that lookup batch. Pages do not depend on the new table. The existing lookup budget and pacing still apply. Newly validated negative results are not repeatedly selected by this recovery pass. Recovery requires NVD to accept requests; the fix does not replace an invalid service key automatically.
+
+Tested HTTP errors including invalid-key 404, genuine empty responses, malformed/mismatched records, preservation of existing data, bounded recovery, retries after failures, and completion of validated negatives using disposable databases. A real public Log4Shell lookup succeeds, while an intentionally invalid diagnostic key raises the expected error without writing to a database.
 
 This product uses the NVD API but is not endorsed or certified by the NVD.
 
@@ -451,6 +455,8 @@ Runs can also be started by hand with **Run workflow** in the Actions tab, and t
 - Stock impact only spots a victim named in the headline. London, Dubai and Abu Dhabi companies come from hand-picked lists, so smaller companies there aren't recognised. Companies that disclose a breach under Item 8.01 instead of 1.05 (allowed for incidents they don't consider material) don't get the SEC link. Foreign companies that report to the SEC on 20-F and 6-K forms aren't covered by Item 1.05 at all, and their cards say so; tickers traded over the counter (often a foreign company's US shares, like Advantest's ATEYY) are labelled, since they trade less than exchange-listed shares.
 
 ## Planned
+
+- Full-site Arabic translation, including headlines and summaries, remains a future addition. Any provider must fit the zero-spending requirement.
 
 - Share prices for Dubai and Abu Dhabi companies, through ADX's official data service (free tier) or a paid market-data feed, and permission from DFM.
 - An admin page for reviewing event submissions, once there's proper login security (strong passwords, rate-limited sign-in, two-factor). Until then, review stays on the command line.

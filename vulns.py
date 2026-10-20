@@ -123,11 +123,18 @@ def fill_recent_kev_details(conn, log):
     key = enrich.api_key()
     pace = enrich.PACE_WITH_KEY if key else enrich.PACE_NO_KEY
     since = (today() - timedelta(days=DETAILS_FOR_NEW_KEV_DAYS)).isoformat()
+    # Revalidate old negative results once: earlier code treated HTTP 404 errors as
+    # missing records. Keep their contents until a successful lookup replaces them.
+    repair_before = get_meta(conn, "nvd_negative_recheck_before")
+    if not repair_before:
+        repair_before = datetime.now(timezone.utc).isoformat()
+        set_meta(conn, "nvd_negative_recheck_before", repair_before)
     # Empty labels may be filled by NVD later. Retry weekly within the existing budget.
     retry_before = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
     have = {r["cve_id"] for r in conn.execute(
-        "SELECT cve_id FROM cve_details WHERE cwes IS NOT NULL AND (cwes != '[]' OR checked_at >= ?)",
-        (retry_before,))}
+        "SELECT cve_id FROM cve_details WHERE cwes IS NOT NULL AND (cwes != '[]' OR checked_at >= ?) "
+        "AND NOT (found = 0 AND checked_at < ?)",
+        (retry_before, repair_before))}
     missing = [r["cve_id"] for r in conn.execute(
         "SELECT cve_id FROM kev WHERE date_added >= ? ORDER BY date_added DESC", (since,)) if r["cve_id"] not in have]
     news_since = (datetime.now(timezone.utc) - timedelta(days=NEWS_DAYS)).isoformat()
@@ -138,17 +145,32 @@ def fill_recent_kev_details(conn, log):
     queued = set(missing)
     missing += [r["cve_id"] for r in conn.execute("SELECT cve_id FROM kev ORDER BY date_added DESC")
                 if r["cve_id"] not in have and r["cve_id"] not in queued]
+    # Include previously negative records outside today's news/KEV windows as well.
+    queued = set(missing)
+    missing += [r["cve_id"] for r in conn.execute(
+        "SELECT cve_id FROM cve_details WHERE found = 0 AND checked_at < ? ORDER BY checked_at DESC, cve_id",
+        (repair_before,)) if r["cve_id"] not in queued]
+    deferred = enrich.deferred_lookups(conn)
+    eligible = [cve for cve in missing if cve not in deferred]
     done = 0
     not_found = []
-    for cve_id in missing[:min(DETAILS_BUDGET, pace["budget"])]:
+    for cve_id in eligible[:min(DETAILS_BUDGET, pace["budget"])]:
         try:
             result = enrich.lookup(cve_id, key)
             enrich.save_lookup(conn, cve_id, result)
             if not result["found"]:
                 not_found.append((cve_id, result.get("missing_reason", "unspecified")))
+        except enrich.NVDKeyRejected:
+            enrich.report_key_rejected(log)
+            break
         except (enrich.RateLimited, requests.RequestException) as e:
+            if enrich.record_failure(e):
+                enrich.defer_lookup(conn, cve_id, log)
+                time.sleep(pace["delay"])
+                continue
             log(f"  ! NVD: {e.__class__.__name__}; the rest next run")
             break
+        enrich.clear_deferred(conn, cve_id)
         done += 1
         time.sleep(pace["delay"])
     enrich.report_missing(not_found, log)
