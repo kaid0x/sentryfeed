@@ -44,8 +44,9 @@
       const row = node('article',undefined,$('results')); row.className = 'result'; node('h3',`${t.id} · ${t.name}`,row);
       node('p',t.description.slice(0,420) + (t.description.length > 420 ? '…' : ''),row);
       node('small',`${t.tactics.join(', ')} · ${t.platforms.join(', ')}`,row);
-      const link = node('a','Read full technique',row); link.href = t.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
-      button('Map to selected evidence',row,() => add(t.id));
+      const actions = node('div',undefined,row); actions.className = 'technique-actions';
+      const link = node('a','Read full technique',actions); link.href = t.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+      button('Map to selected evidence',actions,() => add(t.id));
     }
   }
   function renderMappings() {
