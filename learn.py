@@ -73,7 +73,7 @@ _memory([362, 367], "Race conditions", "Another operation changes shared state b
 _add([416], "Use-after-free", "A program uses memory after releasing it, when its contents may belong to something else.",
      "https://pwn.college/program-security/dynamic-allocator-misuse/", "pwn.college",
      "Practice labs", "Free account. Requires C, pointers and basic binary exploitation; begin with Freebie (Easy).",
-     "https://www.cisa.gov/resources-tools/resources/memory-safe-languages-reducing-vulnerabilities-modern-software-development")
+     "https://cwe.mitre.org/data/definitions/416.html")
 _add([134], "Uncontrolled format strings", "Untrusted input becomes formatting instructions that can read or change program memory.",
      "https://pwn.college/software-exploitation/format-string-exploits/", "pwn.college",
      "Practice labs", "Free account. Advanced: C, assembly and binary exploitation experience are useful.",
