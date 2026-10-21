@@ -1,21 +1,43 @@
-MIT License
+SentryFeed: source-visible project terms
+Copyright (c) 2026 Haseeb Ashfaq. All rights reserved, except as stated below.
 
-Copyright (c) 2026 Haseeb Ashfaq
+These terms apply prospectively to original material owned by Haseeb Ashfaq
+that is first released under these terms. This is not an open-source licence.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Review and contribution permission
+You may inspect this material and make copies and modifications solely to
+prepare, test and submit contributions to the official kaid0x/sentryfeed
+repository. Local execution for this purpose is permitted. Copies must retain
+this notice and must not contain production credentials or private data.
+Publication of a contribution branch or fork on GitHub for review is permitted.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+2. Other uses reserved
+Except for the permission above, rights required by applicable law, GitHub's
+applicable platform terms, or a separate written permission from the relevant
+rights holder, no permission is granted to deploy or operate a replica, publish
+or distribute copies, rebrand the project, sell it, sublicense it, or incorporate
+its code, documentation or original assets into another product or project.
+These terms do not claim ownership of general ideas, methods or independently
+created implementations, or prohibit uses permitted by law.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+3. Earlier releases and third-party material
+Earlier material distributed under the MIT License remains available under
+that licence. These terms do not revoke, narrow or replace permissions already
+granted for that material, even where it remains in the current repository.
+The previous MIT notice is preserved in docs/licenses/previous-MIT.txt and Git
+history. Rights in material owned by other contributors are not changed by
+this notice without their permission.
+
+Third-party software, data and content remain subject to their respective
+licences and terms. In particular, MITRE ATT&CK content retains the notice and
+licence in static/attack-LICENSE.txt. No ownership of source news reporting or
+third-party marks is claimed here.
+
+4. Contributions
+Submitting a contribution does not transfer your copyright. The contribution
+permissions requested by this project are described in CONTRIBUTING.md.
+
+5. Disclaimer
+To the extent permitted by applicable law, the material is provided "AS IS",
+without warranties of any kind. The copyright holders are not liable for
+claims, damages or other liability arising from its use.
