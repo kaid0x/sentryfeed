@@ -129,5 +129,20 @@
 {{ ui.chrome_script() }}
 {{ ui.glossary_script() }}
 {% block scripts %}{% endblock %}
+{% if site_analytics %}
+<script nonce="{{ csp_nonce }}">
+  window.va = window.va || function () { (window.vaq = window.vaq || []).push(arguments); };
+  window.va('beforeSend', function (event) {
+    try {
+      var url = new URL(event.url);
+      if (url.pathname.indexOf('/tasks/') === 0) return null;
+      url.search = '';
+      url.hash = '';
+      return Object.assign({}, event, { url: url.toString() });
+    } catch (_) { return null; }
+  });
+</script>
+<script nonce="{{ csp_nonce }}" defer src="/_vercel/insights/script.js"></script>
+{% endif %}
 </body>
 </html>

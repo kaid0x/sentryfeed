@@ -24,6 +24,8 @@ It began on a Raspberry Pi 3B. Moving repeated processing into the collector cut
 
 The site aims to refresh about every 30 minutes. Sources can fail or be incomplete: ransomware entries are claims, scores are signals, and reported attribution is not proof.
 
+Production page views use Vercel Web Analytics, with query strings and fragments removed before sending. No custom input or tool-result events are added. See the [analytics setup](docs/analytics.md).
+
 ## Suggestions and contributions
 
 Ideas, bug reports and focused contributions are welcome through [GitHub issues](https://github.com/kaid0x/sentryfeed/issues) and pull requests. Please discuss larger changes first and read [CONTRIBUTING.md](CONTRIBUTING.md). Never include credentials, private reports or real password records.

@@ -178,6 +178,7 @@ def inject_page_basics():
     collected = when.astimezone(briefing.DUBAI) if when else None
     return {
         "csp_nonce": g.get("csp_nonce", ""),
+        "site_analytics": os.environ.get("VERCEL") == "1" and os.environ.get("VERCEL_ENV") == "production",
         "site_nav": briefing.NAV,
         "site_footer": briefing.FOOTER,
         "site_glossary": briefing.GLOSSARY,
